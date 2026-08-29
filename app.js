@@ -4,7 +4,20 @@
   const MAX_STUDENTS = 150;
   const STORAGE_KEY = "classroom-seat-live-v1";
   const ROSTER_WIDTH_KEY = "classroom-seat-live-roster-width";
+  const LIVE_SESSION_KEY = "classroom-seat-live-session-v1";
   const DEFAULT_ROSTER_WIDTH = 400;
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyCkUXVET-wH26hCffsn_wO3dFL9cnHVpnM",
+    authDomain: "classroom-seat-live-realtime.firebaseapp.com",
+    projectId: "classroom-seat-live-realtime",
+    storageBucket: "classroom-seat-live-realtime.firebasestorage.app",
+    messagingSenderId: "673249926315",
+    appId: "1:673249926315:web:0fa00111cc2196da016bee",
+  };
+  const roomIdFromUrl = new URLSearchParams(window.location.search).get("room") || "";
+  const isViewerMode = /^[a-f0-9]{32}$/i.test(roomIdFromUrl);
+
+  if (isViewerMode) document.body.classList.add("viewer-mode");
 
   const sections = [
     {
@@ -46,6 +59,8 @@
     assignedCount: document.querySelector("#assignedCount"),
     remainingCount: document.querySelector("#remainingCount"),
     saveState: document.querySelector("#saveState"),
+    shareButton: document.querySelector("#shareButton"),
+    shareButtonText: document.querySelector("#shareButtonText"),
     importButton: document.querySelector("#importButton"),
     excelButton: document.querySelector("#excelButton"),
     pdfButton: document.querySelector("#pdfButton"),
@@ -61,6 +76,13 @@
     rowCount: document.querySelector("#rowCount"),
     toastRegion: document.querySelector("#toastRegion"),
     resetDialog: document.querySelector("#resetDialog"),
+    shareDialog: document.querySelector("#shareDialog"),
+    shareLink: document.querySelector("#shareLink"),
+    copyShareLink: document.querySelector("#copyShareLink"),
+    stopShareButton: document.querySelector("#stopShareButton"),
+    viewerNotice: document.querySelector("#viewerNotice"),
+    viewerNoticeTitle: document.querySelector("#viewerNoticeTitle"),
+    viewerNoticeText: document.querySelector("#viewerNoticeText"),
     dropOverlay: document.querySelector("#dropOverlay"),
     panelResizer: document.querySelector("#panelResizer"),
   };
@@ -70,6 +92,11 @@
   let saveTimer = null;
   let previousAssignments = new Map();
   let pdfJsPromise = null;
+  let firebasePromise = null;
+  let liveSessionId = "";
+  let liveOwnerId = "";
+  let liveSaveTimer = null;
+  let viewerUnsubscribe = null;
   let dragDepth = 0;
 
   function createBlankRows() {
@@ -137,6 +164,8 @@
           seatName.autocomplete = "off";
           seatName.spellcheck = false;
           seatName.placeholder = "이름";
+          seatName.readOnly = isViewerMode;
+          if (isViewerMode) seatName.tabIndex = -1;
           seatName.setAttribute("aria-label", `${code} 자리 이름`);
           seatName.addEventListener("blur", (event) => updateNameFromSeat(code, event.target.value));
           seatName.addEventListener("keydown", (event) => {
@@ -237,12 +266,14 @@
   }
 
   function updateRow(index, field, value) {
+    if (isViewerMode) return;
     rows[index][field] = field === "seat" ? normalizeSeat(value) : value;
     refreshAssignments();
     scheduleSave();
   }
 
   function updateNameFromSeat(seatCode, value) {
+    if (isViewerMode) return;
     const name = escapeText(value);
     const currentIndex = rows.findIndex((row) => normalizeSeat(row.seat) === seatCode);
 
@@ -360,6 +391,7 @@
   }
 
   function focusAssignedStudent(seatCode) {
+    if (isViewerMode) return;
     const { assignments } = calculateState();
     const assignment = assignments.get(seatCode);
     if (!assignment || assignment.duplicate) {
@@ -403,13 +435,16 @@
   }
 
   function scheduleSave() {
+    if (isViewerMode) return;
     dom.saveState.textContent = "저장 중…";
     dom.saveState.classList.add("saving");
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(saveLocal, 280);
+    scheduleLiveSave();
   }
 
   function saveLocal() {
+    if (isViewerMode) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ rows, importedFileName, savedAt: Date.now() }));
       dom.saveState.textContent = "자동 저장됨";
@@ -422,6 +457,7 @@
   }
 
   function loadLocal() {
+    if (isViewerMode) return;
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
       if (!saved || !Array.isArray(saved.rows)) return;
@@ -970,6 +1006,7 @@
   }
 
   function resetAll() {
+    if (isViewerMode) return;
     rows = createBlankRows();
     importedFileName = "";
     previousAssignments.clear();
@@ -1099,6 +1136,14 @@
   }
 
   function bindEvents() {
+    if (isViewerMode) {
+      dom.fullscreenButton.addEventListener("click", toggleFullscreen);
+      document.addEventListener("fullscreenchange", () => {
+        dom.fullscreenButton.title = document.fullscreenElement ? "전체 화면 종료" : "전체 화면";
+        dom.fullscreenButton.setAttribute("aria-label", dom.fullscreenButton.title);
+      });
+      return;
+    }
     dom.importButton.addEventListener("click", () => dom.fileInput.click());
     dom.fileInput.addEventListener("change", () => {
       const [file] = dom.fileInput.files;
@@ -1120,10 +1165,235 @@
     bindPanelResizer();
   }
 
+  function getRemoteState() {
+    return {
+      rows: rows.map((row) => ({
+        name: escapeText(row.name),
+        seat: normalizeSeat(row.seat),
+      })),
+    };
+  }
+
+  function applyRemoteState(state) {
+    if (!state || !Array.isArray(state.rows)) return false;
+    rows = createBlankRows();
+    state.rows.slice(0, MAX_STUDENTS).forEach((row, index) => {
+      rows[index] = {
+        name: escapeText(row?.name),
+        seat: normalizeSeat(row?.seat),
+      };
+    });
+    importedFileName = "";
+    syncInputsFromState();
+    return true;
+  }
+
+  async function loadFirebase() {
+    if (!firebasePromise) {
+      firebasePromise = Promise.all([
+        import("https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js"),
+        import("https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js"),
+        import("https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js"),
+      ]).then(([appModule, authModule, firestoreModule]) => {
+        const app = appModule.initializeApp(FIREBASE_CONFIG);
+        return {
+          auth: authModule.getAuth(app),
+          db: firestoreModule.getFirestore(app),
+          authModule,
+          firestoreModule,
+        };
+      });
+    }
+    return firebasePromise;
+  }
+
+  async function ensureTeacherAuth(firebase) {
+    if (firebase.auth.currentUser) return firebase.auth.currentUser;
+    const credential = await firebase.authModule.signInAnonymously(firebase.auth);
+    return credential.user;
+  }
+
+  function buildShareUrl(sessionId) {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.hash = "";
+    url.searchParams.set("room", sessionId);
+    return url.href;
+  }
+
+  function setLiveUi(active) {
+    dom.shareButton.classList.toggle("is-live", active);
+    dom.shareButtonText.textContent = active ? "LIVE 공유 중" : "실시간 공유";
+    dom.saveState.textContent = active ? "LIVE 연결됨" : "자동 저장됨";
+    dom.saveState.classList.toggle("live", active);
+  }
+
+  async function writeLiveState() {
+    if (!liveSessionId || !liveOwnerId || isViewerMode) return;
+    try {
+      const firebase = await loadFirebase();
+      const reference = firebase.firestoreModule.doc(firebase.db, "seatSessions", liveSessionId);
+      await firebase.firestoreModule.setDoc(reference, {
+        ownerId: liveOwnerId,
+        state: getRemoteState(),
+        updatedAt: firebase.firestoreModule.serverTimestamp(),
+        version: Date.now(),
+      });
+      setLiveUi(true);
+    } catch (error) {
+      console.error("실시간 자리표 저장 실패", error);
+      dom.saveState.textContent = "LIVE 저장 실패";
+      dom.saveState.classList.remove("saving", "live");
+      addToast("실시간 공유 연결이 끊겼습니다. 인터넷 연결을 확인해 주세요.", "error");
+    }
+  }
+
+  function scheduleLiveSave() {
+    if (!liveSessionId || isViewerMode) return;
+    window.clearTimeout(liveSaveTimer);
+    liveSaveTimer = window.setTimeout(writeLiveState, 450);
+  }
+
+  async function startLiveShare() {
+    dom.shareButton.disabled = true;
+    dom.shareButton.classList.add("is-loading");
+    try {
+      const firebase = await loadFirebase();
+      const user = await ensureTeacherAuth(firebase);
+      liveOwnerId = user.uid;
+      liveSessionId = liveSessionId || crypto.randomUUID().replaceAll("-", "");
+      await writeLiveState();
+      localStorage.setItem(LIVE_SESSION_KEY, liveSessionId);
+      dom.shareLink.value = buildShareUrl(liveSessionId);
+      dom.shareDialog.showModal();
+      addToast("학생용 실시간 링크를 만들었습니다.");
+    } catch (error) {
+      console.error("실시간 공유 시작 실패", error);
+      liveSessionId = "";
+      liveOwnerId = "";
+      localStorage.removeItem(LIVE_SESSION_KEY);
+      setLiveUi(false);
+      addToast("실시간 공유를 시작하지 못했습니다. 인터넷 연결을 확인해 주세요.", "error");
+    } finally {
+      dom.shareButton.disabled = false;
+      dom.shareButton.classList.remove("is-loading");
+    }
+  }
+
+  async function resumeLiveShare() {
+    const savedSessionId = localStorage.getItem(LIVE_SESSION_KEY) || "";
+    if (!/^[a-f0-9]{32}$/i.test(savedSessionId)) return;
+    try {
+      const firebase = await loadFirebase();
+      const user = await ensureTeacherAuth(firebase);
+      const reference = firebase.firestoreModule.doc(firebase.db, "seatSessions", savedSessionId);
+      const snapshot = await firebase.firestoreModule.getDoc(reference);
+      if (!snapshot.exists() || snapshot.data().ownerId !== user.uid) throw new Error("공유 소유권을 확인할 수 없습니다.");
+      liveSessionId = savedSessionId;
+      liveOwnerId = user.uid;
+      dom.shareLink.value = buildShareUrl(liveSessionId);
+      setLiveUi(true);
+      scheduleLiveSave();
+    } catch (error) {
+      console.warn("이전 실시간 공유를 이어갈 수 없습니다.", error);
+      localStorage.removeItem(LIVE_SESSION_KEY);
+      liveSessionId = "";
+      liveOwnerId = "";
+      setLiveUi(false);
+    }
+  }
+
+  async function stopLiveShare() {
+    if (!liveSessionId) return;
+    dom.stopShareButton.disabled = true;
+    try {
+      const firebase = await loadFirebase();
+      const reference = firebase.firestoreModule.doc(firebase.db, "seatSessions", liveSessionId);
+      await firebase.firestoreModule.deleteDoc(reference);
+      liveSessionId = "";
+      liveOwnerId = "";
+      localStorage.removeItem(LIVE_SESSION_KEY);
+      setLiveUi(false);
+      dom.shareDialog.close();
+      addToast("실시간 공유를 종료했습니다.");
+    } catch (error) {
+      console.error("실시간 공유 종료 실패", error);
+      addToast("공유를 종료하지 못했습니다. 다시 시도해 주세요.", "error");
+    } finally {
+      dom.stopShareButton.disabled = false;
+    }
+  }
+
+  async function copyShareLink() {
+    try {
+      await navigator.clipboard.writeText(dom.shareLink.value);
+      addToast("학생용 링크를 복사했습니다.");
+    } catch (error) {
+      dom.shareLink.focus();
+      dom.shareLink.select();
+      document.execCommand("copy");
+      addToast("학생용 링크를 복사했습니다.");
+    }
+  }
+
+  function bindLiveShareEvents() {
+    dom.shareButton.addEventListener("click", () => {
+      if (liveSessionId) {
+        dom.shareLink.value = buildShareUrl(liveSessionId);
+        dom.shareDialog.showModal();
+      } else {
+        startLiveShare();
+      }
+    });
+    dom.copyShareLink.addEventListener("click", copyShareLink);
+    dom.stopShareButton.addEventListener("click", stopLiveShare);
+  }
+
+  function setViewerStatus(title, text, type = "") {
+    dom.viewerNotice.hidden = false;
+    dom.viewerNotice.className = `viewer-notice ${type}`.trim();
+    dom.viewerNoticeTitle.textContent = title;
+    dom.viewerNoticeText.textContent = text;
+    dom.saveState.textContent = title;
+    dom.saveState.classList.toggle("live", type !== "error");
+  }
+
+  async function initializeViewer() {
+    document.querySelector("#seatPanelTitle").textContent = "학생용 실시간 자리표";
+    setViewerStatus("연결 중…", "선생님의 자리표를 불러오고 있습니다.");
+    try {
+      const firebase = await loadFirebase();
+      const reference = firebase.firestoreModule.doc(firebase.db, "seatSessions", roomIdFromUrl);
+      viewerUnsubscribe = firebase.firestoreModule.onSnapshot(reference, (snapshot) => {
+        if (!snapshot.exists()) {
+          setViewerStatus("공유 종료됨", "선생님이 공유를 끝냈거나 링크가 올바르지 않습니다.", "error");
+          return;
+        }
+        if (!applyRemoteState(snapshot.data().state)) {
+          setViewerStatus("표시 오류", "자리표 데이터를 읽지 못했습니다.", "error");
+          return;
+        }
+        setViewerStatus("실시간 연결됨", "선생님이 자리를 바꾸면 이 화면도 자동으로 갱신됩니다.", "connected");
+      }, (error) => {
+        console.error("학생용 실시간 연결 실패", error);
+        setViewerStatus("연결 실패", "인터넷 연결을 확인한 뒤 새로고침해 주세요.", "error");
+      });
+    } catch (error) {
+      console.error("학생용 화면 초기화 실패", error);
+      setViewerStatus("연결 실패", "인터넷 연결을 확인한 뒤 새로고침해 주세요.", "error");
+    }
+  }
+
   loadLocal();
   loadRosterWidth();
   buildSeatMap();
   buildRoster();
   bindEvents();
   syncInputsFromState();
+  if (isViewerMode) {
+    initializeViewer();
+  } else {
+    bindLiveShareEvents();
+    resumeLiveShare();
+  }
 })();

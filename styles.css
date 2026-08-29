@@ -150,6 +150,11 @@ button {
   background: rgb(255 176 57 / 12%);
 }
 
+.save-state.live {
+  color: #062a36;
+  background: #28d7a1;
+}
+
 .toolbar {
   justify-self: end;
   display: flex;
@@ -205,6 +210,18 @@ button {
   border-color: var(--accent);
   color: #062a36;
   background: var(--accent);
+}
+
+.button-live {
+  border-color: #386071;
+  color: #9ee9ff;
+  background: #143440;
+}
+
+.button-live.is-live {
+  border-color: #28d7a1;
+  color: #062a36;
+  background: #28d7a1;
 }
 
 .button:disabled {
@@ -301,6 +318,7 @@ body.panel-resizing {
 }
 
 .seat-panel {
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -313,6 +331,56 @@ body.panel-resizing {
     linear-gradient(rgb(17 24 32 / 2%) 1px, transparent 1px),
     #f6f7f7;
   background-size: 24px 24px;
+}
+
+.viewer-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: -4px;
+  padding: 9px 12px;
+  border: 1px solid #acdfe9;
+  border-radius: 9px;
+  color: #315661;
+  background: #ecfbfe;
+  font-size: 11px;
+}
+
+.viewer-notice[hidden] {
+  display: none;
+}
+
+.viewer-notice strong {
+  color: #075e75;
+}
+
+.viewer-notice-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #f0a51b;
+  box-shadow: 0 0 0 4px rgb(240 165 27 / 12%);
+}
+
+.viewer-notice.connected .viewer-notice-dot {
+  background: #13ae7b;
+  box-shadow: 0 0 0 4px rgb(19 174 123 / 12%);
+}
+
+.viewer-notice.error {
+  border-color: #e6b6b1;
+  color: #84362f;
+  background: #fff1ef;
+}
+
+.viewer-notice.error strong {
+  color: #9d2f25;
+}
+
+.viewer-notice.error .viewer-notice-dot {
+  background: #c24136;
+  box-shadow: 0 0 0 4px rgb(194 65 54 / 12%);
 }
 
 .panel-heading,
@@ -927,6 +995,91 @@ body.panel-resizing {
   border-color: var(--danger);
 }
 
+.share-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.share-link-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.share-link-box input {
+  min-width: 0;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #cbd4da;
+  border-radius: 9px;
+  outline: 0;
+  color: #34414b;
+  background: #f7f9fa;
+  font-size: 12px;
+}
+
+.share-link-box input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(13 169 214 / 14%);
+}
+
+.share-dialog .button-copy {
+  color: #042c39;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.share-dialog .share-caution {
+  margin-top: 11px;
+  color: #876617;
+  font-size: 11px;
+}
+
+.split-actions {
+  justify-content: space-between;
+}
+
+.share-dialog .button-stop {
+  color: #9d2f25;
+  background: #fff0ee;
+  border-color: #e7b5b0;
+}
+
+.viewer-mode .workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.viewer-mode .roster-panel,
+.viewer-mode .panel-resizer,
+.viewer-mode #importButton,
+.viewer-mode #excelButton,
+.viewer-mode #pdfButton,
+.viewer-mode #resetButton,
+.viewer-mode .teacher-only {
+  display: none;
+}
+
+.viewer-mode .topbar {
+  grid-template-columns: minmax(210px, 1fr) auto auto;
+}
+
+.viewer-mode .seat {
+  cursor: default;
+}
+
+.viewer-mode .seat-panel {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.viewer-mode .seat:hover,
+.viewer-mode .seat:focus-within {
+  box-shadow: none;
+}
+
+.viewer-mode .seat-name {
+  cursor: default;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -1026,6 +1179,14 @@ body.panel-resizing {
     height: 74svh;
     border-top: 1px solid #ced5da;
     border-left: 0;
+  }
+
+  .viewer-mode .topbar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .viewer-mode .seat-panel {
+    min-height: calc(100svh - 120px);
   }
 }
 

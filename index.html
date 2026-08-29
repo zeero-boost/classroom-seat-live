@@ -6,12 +6,12 @@
     <meta name="theme-color" content="#111820" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111820%22/><circle cx=%2232%22 cy=%2232%22 r=%2212%22 fill=%22%230da9d6%22/></svg>" />
     <title>자리배치 LIVE</title>
-    <link rel="stylesheet" href="./styles.css?v=20260829-5" />
+    <link rel="stylesheet" href="./styles.css?v=20260829-10" />
     <script src="./xlsx.full.min.js" defer></script>
     <script src="./exceljs.min.js" defer></script>
     <script src="./jspdf.umd.min.js" defer></script>
     <script src="./pdf.min.js?v=20260829-8" defer></script>
-    <script src="./app.js?v=20260829-9" defer></script>
+    <script src="./app.js?v=20260829-10" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -33,6 +33,10 @@
 
         <div class="toolbar" aria-label="파일 및 화면 도구">
           <input id="fileInput" type="file" accept=".xlsx,.xls,.csv,.pdf,application/pdf" hidden />
+          <button class="button button-live teacher-only" id="shareButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2" /><path d="M8.5 8.5a5 5 0 0 0 0 7m7-7a5 5 0 0 1 0 7M5.5 5.5a9 9 0 0 0 0 13m13-13a9 9 0 0 1 0 13" /></svg>
+            <span id="shareButtonText">실시간 공유</span>
+          </button>
           <button class="button button-primary" id="importButton" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0-11 4 4m-4-4L8 7M5 14v5h14v-5" /></svg>
             명단 파일 불러오기
@@ -65,6 +69,12 @@
               <span><i class="legend-dot open"></i>빈자리</span>
               <span><i class="legend-dot assigned"></i>배치 완료</span>
             </div>
+          </div>
+
+          <div class="viewer-notice" id="viewerNotice" hidden>
+            <span class="viewer-notice-dot" aria-hidden="true"></span>
+            <strong id="viewerNoticeTitle">실시간 연결 중</strong>
+            <span id="viewerNoticeText">자리 변경 내용이 자동으로 표시됩니다.</span>
           </div>
 
           <div class="classroom" id="classroom" aria-label="강의실 자리 배치표">
@@ -146,6 +156,24 @@
         <div class="dialog-actions">
           <button class="button" value="cancel">취소</button>
           <button class="button button-danger" value="confirm">모두 지우기</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="confirm-dialog share-dialog" id="shareDialog">
+      <form method="dialog">
+        <p class="dialog-kicker">학생 실시간 보기</p>
+        <h2>이 링크를 학생들에게 보내세요</h2>
+        <p>링크를 연 학생은 자리표만 읽기 전용으로 보며, 이 화면에서 수정한 내용이 바로 반영됩니다.</p>
+        <label class="share-link-box">
+          <span class="sr-only">학생용 공유 링크</span>
+          <input id="shareLink" type="text" readonly />
+          <button class="button button-copy" id="copyShareLink" type="button">링크 복사</button>
+        </label>
+        <p class="share-caution">링크를 가진 사람은 자리표의 이름을 볼 수 있습니다. 수업이 끝나면 공유를 종료해 주세요.</p>
+        <div class="dialog-actions split-actions">
+          <button class="button button-stop" id="stopShareButton" type="button">공유 종료</button>
+          <button class="button" value="close">닫기</button>
         </div>
       </form>
     </dialog>
