@@ -6,6 +6,7 @@
   const ROSTER_WIDTH_KEY = "classroom-seat-live-roster-width";
   const LIVE_SESSION_KEY = "classroom-seat-live-session-v1";
   const DEFAULT_ROSTER_WIDTH = 400;
+  const LIVE_SAVE_DELAY = 70;
   const FIREBASE_CONFIG = {
     apiKey: "AIzaSyCkUXVET-wH26hCffsn_wO3dFL9cnHVpnM",
     authDomain: "classroom-seat-live-realtime.firebaseapp.com",
@@ -447,8 +448,12 @@
     if (isViewerMode) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ rows, importedFileName, savedAt: Date.now() }));
-      dom.saveState.textContent = "자동 저장됨";
-      dom.saveState.classList.remove("saving");
+      if (liveSessionId) {
+        setLiveUi(true);
+      } else {
+        dom.saveState.textContent = "자동 저장됨";
+        dom.saveState.classList.remove("saving");
+      }
     } catch (error) {
       console.error(error);
       dom.saveState.textContent = "저장 실패";
@@ -1225,6 +1230,7 @@
     dom.shareButton.classList.toggle("is-live", active);
     dom.shareButtonText.textContent = active ? "LIVE 공유 중" : "실시간 공유";
     dom.saveState.textContent = active ? "LIVE 연결됨" : "자동 저장됨";
+    dom.saveState.classList.remove("saving");
     dom.saveState.classList.toggle("live", active);
   }
 
@@ -1250,8 +1256,11 @@
 
   function scheduleLiveSave() {
     if (!liveSessionId || isViewerMode) return;
+    dom.saveState.textContent = "LIVE 반영 중…";
+    dom.saveState.classList.add("saving");
+    dom.saveState.classList.remove("live");
     window.clearTimeout(liveSaveTimer);
-    liveSaveTimer = window.setTimeout(writeLiveState, 450);
+    liveSaveTimer = window.setTimeout(writeLiveState, LIVE_SAVE_DELAY);
   }
 
   async function startLiveShare() {
