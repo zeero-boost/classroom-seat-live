@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111820" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111820%22/><circle cx=%2232%22 cy=%2232%22 r=%2212%22 fill=%22%230da9d6%22/></svg>" />
+    <title>자리배치 LIVE</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./xlsx.full.min.js" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="live-dot" aria-hidden="true"></div>
+          <div>
+            <p class="eyebrow">CLASSROOM LIVE</p>
+            <h1>자리배치</h1>
+          </div>
+        </div>
+
+        <div class="topbar-status" aria-live="polite">
+          <span><strong id="assignedCount">0</strong>명 배치</span>
+          <span class="status-divider"></span>
+          <span><strong id="remainingCount">0</strong>명 대기</span>
+          <span class="save-state" id="saveState">자동 저장됨</span>
+        </div>
+
+        <div class="toolbar" aria-label="파일 및 화면 도구">
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" hidden />
+          <button class="button button-primary" id="importButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0-11 4 4m-4-4L8 7M5 14v5h14v-5" /></svg>
+            호명 파일 불러오기
+          </button>
+          <button class="button" id="exportButton" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 11 4-4m-4 4-4-4M5 16v4h14v-4" /></svg>
+            결과 저장
+          </button>
+          <button class="icon-button" id="fullscreenButton" type="button" title="전체 화면" aria-label="전체 화면">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M8 21H3v-5m13 5h5v-5" /></svg>
+          </button>
+          <button class="icon-button danger" id="resetButton" type="button" title="전체 초기화" aria-label="전체 초기화">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6" /></svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="seat-panel" aria-labelledby="seatPanelTitle">
+          <div class="panel-heading">
+            <div>
+              <p class="panel-kicker">실시간 배치 현황</p>
+              <h2 id="seatPanelTitle">강의실 자리표</h2>
+            </div>
+            <div class="legend" aria-label="자리 상태 범례">
+              <span><i class="legend-dot open"></i>빈자리</span>
+              <span><i class="legend-dot assigned"></i>배치 완료</span>
+            </div>
+          </div>
+
+          <div class="classroom" id="classroom" aria-label="강의실 자리 배치표">
+            <div class="room-edge room-edge-window">창가</div>
+            <div class="sections" id="seatSections"></div>
+            <div class="room-edge room-edge-door">앞문</div>
+          </div>
+
+          <div class="front-zone" aria-label="강의실 앞쪽">
+            <div class="front-marker window-side">창가</div>
+            <div class="front-marker podium">교탁 <span>PC · 교수님</span></div>
+            <div class="front-marker stage">교단</div>
+            <div class="front-marker door">앞문</div>
+          </div>
+        </section>
+
+        <aside class="roster-panel" aria-labelledby="rosterTitle">
+          <div class="roster-header">
+            <div>
+              <p class="panel-kicker">최대 125명</p>
+              <h2 id="rosterTitle">호명 순서</h2>
+            </div>
+            <label class="search-box">
+              <span class="sr-only">학생 검색</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
+              <input id="searchInput" type="search" placeholder="이름 검색" autocomplete="off" />
+            </label>
+          </div>
+
+          <div class="roster-help">
+            이름 옆에 자리 코드(<strong>A9</strong>)를 입력하면 왼쪽 자리에 즉시 표시됩니다.
+          </div>
+
+          <div class="roster-columns" aria-hidden="true">
+            <span>순번</span><span>이름</span><span>자리</span><span>상태</span>
+          </div>
+
+          <div class="roster-scroll" id="rosterScroll">
+            <div class="roster-list" id="rosterList"></div>
+            <div class="empty-search" id="emptySearch" hidden>검색 결과가 없습니다.</div>
+          </div>
+
+          <div class="roster-footer">
+            <span id="fileName">파일을 불러오거나 직접 입력하세요.</span>
+            <span id="rowCount">0 / 125</span>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+
+    <dialog class="confirm-dialog" id="resetDialog">
+      <form method="dialog">
+        <p class="dialog-kicker">전체 초기화</p>
+        <h2>입력한 명단과 자리를 모두 지울까요?</h2>
+        <p>이 작업은 되돌릴 수 없습니다. 저장할 내용이 있다면 먼저 결과를 내려받아 주세요.</p>
+        <div class="dialog-actions">
+          <button class="button" value="cancel">취소</button>
+          <button class="button button-danger" value="confirm">모두 지우기</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>
