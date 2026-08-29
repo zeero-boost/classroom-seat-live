@@ -58,12 +58,15 @@
     rowCount: document.querySelector("#rowCount"),
     toastRegion: document.querySelector("#toastRegion"),
     resetDialog: document.querySelector("#resetDialog"),
+    dropOverlay: document.querySelector("#dropOverlay"),
   };
 
   let rows = createBlankRows();
   let importedFileName = "";
   let saveTimer = null;
   let previousAssignments = new Map();
+  let pdfJsPromise = null;
+  let dragDepth = 0;
 
   function createBlankRows() {
     return Array.from({ length: MAX_STUDENTS }, () => ({ name: "", seat: "" }));
@@ -116,13 +119,34 @@
             return;
           }
 
-          const seat = document.createElement("button");
-          seat.type = "button";
+          const seat = document.createElement("div");
           seat.className = "seat";
           seat.dataset.seat = code;
-          seat.setAttribute("aria-label", `${code} 빈자리`);
-          seat.innerHTML = `<span class="seat-code">${code}</span><span class="seat-name"></span>`;
-          seat.addEventListener("click", () => focusAssignedStudent(code));
+          const seatCode = document.createElement("span");
+          seatCode.className = "seat-code";
+          seatCode.textContent = code;
+
+          const seatName = document.createElement("input");
+          seatName.className = "seat-name";
+          seatName.type = "text";
+          seatName.maxLength = 20;
+          seatName.autocomplete = "off";
+          seatName.spellcheck = false;
+          seatName.placeholder = "이름";
+          seatName.setAttribute("aria-label", `${code} 자리 이름`);
+          seatName.addEventListener("change", (event) => updateNameFromSeat(code, event.target.value));
+          seatName.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              refreshAssignments();
+              event.currentTarget.blur();
+            }
+          });
+
+          seat.append(seatCode, seatName);
           rowEl.append(seat);
         });
 
@@ -213,6 +237,39 @@
     scheduleSave();
   }
 
+  function updateNameFromSeat(seatCode, value) {
+    const name = escapeText(value);
+    const currentIndex = rows.findIndex((row) => normalizeSeat(row.seat) === seatCode);
+
+    if (!name) {
+      if (currentIndex >= 0) rows[currentIndex].seat = "";
+    } else if (currentIndex >= 0) {
+      const sameNameIndex = rows.findIndex((row, index) => index !== currentIndex && escapeText(row.name) === name);
+      if (sameNameIndex >= 0) {
+        rows[currentIndex].seat = "";
+        rows[sameNameIndex].seat = seatCode;
+      } else {
+        rows[currentIndex].name = name;
+      }
+    } else {
+      const sameNameIndex = rows.findIndex((row) => escapeText(row.name) === name);
+      if (sameNameIndex >= 0) {
+        rows[sameNameIndex].seat = seatCode;
+      } else {
+        const blankIndex = rows.findIndex((row) => !escapeText(row.name) && !normalizeSeat(row.seat));
+        if (blankIndex === -1) {
+          addToast("명단 125칸이 모두 사용 중입니다.", "error");
+          refreshAssignments();
+          return;
+        }
+        rows[blankIndex] = { name, seat: seatCode };
+      }
+    }
+
+    syncInputsFromState();
+    scheduleSave();
+  }
+
   function calculateState() {
     const seatRows = new Map();
     const rowStates = rows.map(() => ({ type: "empty", label: "대기" }));
@@ -266,8 +323,8 @@
 
       seatEl.classList.toggle("assigned", Boolean(assignment));
       seatEl.classList.toggle("duplicate", Boolean(assignment?.duplicate));
-      nameEl.textContent = assignment?.name ?? "";
-      seatEl.setAttribute("aria-label", assignment ? `${code} ${assignment.name}` : `${code} 빈자리`);
+      if (document.activeElement !== nameEl) nameEl.value = assignment?.name ?? "";
+      nameEl.setAttribute("aria-label", assignment ? `${code} 자리 ${assignment.name}` : `${code} 자리 이름`);
 
       if (assignment && previous !== assignment.name) {
         seatEl.classList.remove("just-assigned");
@@ -387,30 +444,19 @@
   }
 
   async function importFile(file) {
-    if (!window.XLSX) {
-      addToast("엑셀 읽기 도구를 불러오지 못했습니다.", "error");
+    if (!file || !/\.(?:pdf|xlsx|xls|csv)$/i.test(file.name)) {
+      addToast("PDF, 엑셀 또는 CSV 명단만 불러올 수 있습니다.", "error");
       return;
     }
 
+    dom.importButton.disabled = true;
+    dom.importButton.classList.add("is-loading");
+    dom.importButton.setAttribute("aria-busy", "true");
     try {
-      const data = await file.arrayBuffer();
-      const isCsv = /\.csv$/i.test(file.name);
-      let workbook;
-      if (isCsv) {
-        let text = new TextDecoder("utf-8").decode(data);
-        if (text.includes("\uFFFD")) text = new TextDecoder("euc-kr").decode(data);
-        workbook = window.XLSX.read(text.replace(/^\uFEFF/, ""), { type: "string" });
-      } else {
-        workbook = window.XLSX.read(data, { type: "array" });
-      }
-      const preferredSheet = workbook.SheetNames.find((name) => /호명|명단|순서|roster/i.test(name));
-      const sheetName = preferredSheet || workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-      const matrix = window.XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
-      const importedRows = extractRoster(matrix);
+      const importedRows = /\.pdf$/i.test(file.name) ? await readPdfRoster(file) : await readSpreadsheetRoster(file);
 
       if (!importedRows.length) {
-        addToast("파일에서 학생 이름을 찾지 못했습니다.", "error");
+        addToast(/\.pdf$/i.test(file.name) ? "PDF에서 이름을 찾지 못했습니다. 스캔 이미지 PDF인지 확인해 주세요." : "파일에서 학생 이름을 찾지 못했습니다.", "error");
         return;
       }
 
@@ -426,10 +472,142 @@
       addToast(`${Math.min(importedRows.length, MAX_STUDENTS)}명의 명단을 불러왔습니다.`);
     } catch (error) {
       console.error(error);
-      addToast("파일을 읽지 못했습니다. 엑셀 또는 CSV 파일인지 확인해 주세요.", "error");
+      if (error?.name === "PasswordException") {
+        addToast("암호가 설정된 PDF는 읽을 수 없습니다.", "error");
+      } else {
+        addToast("파일을 읽지 못했습니다. PDF, 엑셀 또는 CSV 파일인지 확인해 주세요.", "error");
+      }
     } finally {
       dom.fileInput.value = "";
+      dom.importButton.disabled = false;
+      dom.importButton.classList.remove("is-loading");
+      dom.importButton.removeAttribute("aria-busy");
     }
+  }
+
+  async function readSpreadsheetRoster(file) {
+    if (!window.XLSX) throw new Error("엑셀 읽기 도구를 불러오지 못했습니다.");
+
+    const data = await file.arrayBuffer();
+    const isCsv = /\.csv$/i.test(file.name);
+    let workbook;
+    if (isCsv) {
+      let text = new TextDecoder("utf-8").decode(data);
+      if (text.includes("\uFFFD")) text = new TextDecoder("euc-kr").decode(data);
+      workbook = window.XLSX.read(text.replace(/^\uFEFF/, ""), { type: "string" });
+    } else {
+      workbook = window.XLSX.read(data, { type: "array" });
+    }
+    const preferredSheet = workbook.SheetNames.find((name) => /호명|명단|순서|roster/i.test(name));
+    const sheetName = preferredSheet || workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const matrix = window.XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+    return extractRoster(matrix);
+  }
+
+  async function loadPdfJs() {
+    if (!pdfJsPromise) {
+      pdfJsPromise = import("./pdf.min.mjs").then((pdfjsLib) => {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("./pdf.worker.min.mjs", window.location.href).href;
+        return pdfjsLib;
+      });
+    }
+    return pdfJsPromise;
+  }
+
+  async function readPdfRoster(file) {
+    const pdfjsLib = await loadPdfJs();
+    const data = new Uint8Array(await file.arrayBuffer());
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    const matrix = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+      matrix.push(...pdfItemsToMatrix(textContent.items));
+    }
+
+    return extractPdfRoster(matrix);
+  }
+
+  function pdfItemsToMatrix(items) {
+    const lines = [];
+    items.forEach((item) => {
+      const text = escapeText(item.str);
+      if (!text) return;
+      const x = Number(item.transform?.[4] ?? 0);
+      const y = Number(item.transform?.[5] ?? 0);
+      let line = lines.find((candidate) => Math.abs(candidate.y - y) <= 3);
+      if (!line) {
+        line = { y, items: [] };
+        lines.push(line);
+      }
+      line.items.push({ text, x, width: Number(item.width ?? 0), height: Math.abs(Number(item.height ?? item.transform?.[0] ?? 10)) });
+    });
+
+    return lines
+      .sort((a, b) => b.y - a.y)
+      .map((line) => {
+        const cells = [];
+        let buffer = "";
+        let rightEdge = null;
+        let previousHeight = 10;
+        line.items.sort((a, b) => a.x - b.x).forEach((item) => {
+          const gap = rightEdge === null ? 0 : item.x - rightEdge;
+          const isColumnGap = rightEdge !== null && gap > Math.max(12, previousHeight * 0.9);
+          if (isColumnGap && buffer) {
+            cells.push(buffer.trim());
+            buffer = item.text;
+          } else {
+            const needsSpace = buffer && gap > 2.5;
+            buffer += `${needsSpace ? " " : ""}${item.text}`;
+          }
+          rightEdge = Math.max(item.x + item.width, item.x);
+          previousHeight = item.height || previousHeight;
+        });
+        if (buffer) cells.push(buffer.trim());
+        return cells;
+      })
+      .filter((row) => row.length);
+  }
+
+  function extractPdfRoster(matrix) {
+    const result = [];
+    const ignored = /^(?:호명순서|호명명단|명단|이름|성명|학생명|학생|학번|순번|번호|자리|좌석|상태|대기|배치|페이지|과대단|과대)$/i;
+
+    matrix.forEach((row) => {
+      const cells = row.map((cell) => escapeText(cell)).filter(Boolean);
+      if (!cells.length) return;
+
+      const rawLine = cells.join(" ");
+      const hasOrdinal = cells.some((cell) => /^\d{1,12}\s*[.)번:\-]?$/.test(cell)) || /^\s*\d{1,12}\s+/.test(rawLine);
+
+      const joined = cells
+        .join(" ")
+        .replace(/(?<=[가-힣])\s+(?=[가-힣])/g, "")
+        .replace(/(?:호명순서|호명명단|학생명단|이름|성명|학생명|학번|순번|번호|자리번호|자리|좌석|상태)/gi, " ")
+        .replace(/^\s*\d{1,12}\s*[.)번:\-]?\s*/, " ")
+        .trim();
+      const seatMatch = joined.match(/(?:^|\s)([A-N](?:10|[1-9]))(?:\s|$)/i);
+      const withoutSeat = joined.replace(/(?:^|\s)[A-N](?:10|[1-9])(?:\s|$)/gi, " ").trim();
+      const koreanNames = withoutSeat.match(/[가-힣]{2,6}/g) || [];
+      let name = koreanNames.find((candidate) => {
+        if (ignored.test(candidate) || /(?:학과|학년|강의|수업|교수|담당)$/.test(candidate)) return false;
+        const isStandaloneShortName = candidate.length <= 4 && withoutSeat.replace(/\s/g, "") === candidate;
+        return hasOrdinal || Boolean(seatMatch) || isStandaloneShortName;
+      });
+
+      if (!name) {
+        const latin = withoutSeat.match(/[A-Za-z][A-Za-z.'-]{1,}(?:\s+[A-Za-z][A-Za-z.'-]{1,}){0,3}/);
+        const isStandaloneLatinName = latin && withoutSeat.trim() === latin[0] && latin[0].split(/\s+/).length <= 4;
+        if (latin && !/^(?:pdf|name|student|seat|page)$/i.test(latin[0]) && (hasOrdinal || Boolean(seatMatch) || isStandaloneLatinName)) name = latin[0];
+      }
+
+      if (name && !ignored.test(name)) result.push({ name, seat: normalizeSeat(seatMatch?.[1] || "") });
+    });
+
+    if (result.length) return result;
+    return extractRoster(matrix);
   }
 
   function extractRoster(matrix) {
@@ -538,6 +716,52 @@
     addToast("명단과 자리 입력을 모두 지웠습니다.");
   }
 
+  function isFileDrag(event) {
+    return Array.from(event.dataTransfer?.types || []).includes("Files");
+  }
+
+  function showDropOverlay() {
+    dom.dropOverlay.hidden = false;
+    dom.dropOverlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("file-dragging");
+  }
+
+  function hideDropOverlay() {
+    dragDepth = 0;
+    dom.dropOverlay.hidden = true;
+    dom.dropOverlay.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("file-dragging");
+  }
+
+  function bindFileDrop() {
+    document.addEventListener("dragenter", (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      dragDepth += 1;
+      showDropOverlay();
+    });
+    document.addEventListener("dragover", (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    });
+    document.addEventListener("dragleave", (event) => {
+      if (!isFileDrag(event)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) hideDropOverlay();
+    });
+    document.addEventListener("drop", (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      const files = Array.from(event.dataTransfer.files || []);
+      hideDropOverlay();
+      if (!files.length) return;
+      if (files.length > 1) addToast("여러 파일 중 첫 번째 명단만 불러옵니다.");
+      importFile(files[0]);
+    });
+    window.addEventListener("blur", hideDropOverlay);
+  }
+
   function bindEvents() {
     dom.importButton.addEventListener("click", () => dom.fileInput.click());
     dom.fileInput.addEventListener("change", () => {
@@ -555,6 +779,7 @@
       dom.fullscreenButton.title = document.fullscreenElement ? "전체 화면 종료" : "전체 화면";
       dom.fullscreenButton.setAttribute("aria-label", dom.fullscreenButton.title);
     });
+    bindFileDrop();
   }
 
   loadLocal();

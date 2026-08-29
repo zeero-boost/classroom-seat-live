@@ -29,10 +29,10 @@
         </div>
 
         <div class="toolbar" aria-label="파일 및 화면 도구">
-          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" hidden />
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.csv,.pdf,application/pdf" hidden />
           <button class="button button-primary" id="importButton" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0-11 4 4m-4-4L8 7M5 14v5h14v-5" /></svg>
-            호명 파일 불러오기
+            명단 파일 불러오기
           </button>
           <button class="button" id="exportButton" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 11 4-4m-4 4-4-4M5 16v4h14v-4" /></svg>
@@ -88,7 +88,7 @@
           </div>
 
           <div class="roster-help">
-            이름 옆에 자리 코드(<strong>A9</strong>)를 입력하면 왼쪽 자리에 즉시 표시됩니다.
+            파일을 화면에 끌어놓으세요. 이름 옆에 자리 코드(<strong>A9</strong>)를 쓰거나, 왼쪽 자리 칸에 이름을 직접 입력해도 됩니다.
           </div>
 
           <div class="roster-columns" aria-hidden="true">
@@ -106,6 +106,14 @@
           </div>
         </aside>
       </main>
+    </div>
+
+    <div class="drop-overlay" id="dropOverlay" hidden aria-hidden="true">
+      <div class="drop-message">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5m0 0 4 4m-4-4L8 9M5 17v2h14v-2" /></svg>
+        <strong>명단 파일을 여기에 놓으세요</strong>
+        <span>PDF · XLSX · XLS · CSV</span>
+      </div>
     </div>
 
     <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>

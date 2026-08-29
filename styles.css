@@ -206,6 +206,16 @@ button {
   background: var(--accent);
 }
 
+.button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
+}
+
+.button.is-loading svg {
+  animation: spin 900ms linear infinite;
+}
+
 .icon-button {
   width: 38px;
   height: 38px;
@@ -367,16 +377,23 @@ button {
 
 .seat {
   display: grid;
+  grid-template-rows: auto minmax(15px, 1fr);
   place-items: center;
   padding: 3px;
   overflow: hidden;
   color: #38434e;
+  cursor: text;
   transition: background 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 }
 
-.seat:hover {
+.seat:hover,
+.seat:focus-within {
   z-index: 2;
   box-shadow: 0 0 0 2px var(--accent) inset;
+}
+
+.seat:focus-within {
+  background: #fff;
 }
 
 .seat-code {
@@ -386,14 +403,30 @@ button {
 }
 
 .seat-name {
-  display: none;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 2px;
+  border: 0;
+  outline: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: inherit;
+  background: transparent;
   font-size: clamp(9px, 0.82vw, 15px);
   font-weight: 900;
   letter-spacing: -0.045em;
+  text-align: center;
+}
+
+.seat-name::placeholder {
+  color: transparent;
+}
+
+.seat:focus-within .seat-name::placeholder {
+  color: #9aa5ae;
 }
 
 .seat.assigned {
@@ -411,13 +444,19 @@ button {
 }
 
 .seat.assigned .seat-name {
-  display: block;
+  grid-row: 1 / -1;
+  align-self: stretch;
+  color: #042c39;
 }
 
 .seat.duplicate {
   color: #6f1e17;
   background: #ffb8b1;
   border-color: #d46b60;
+}
+
+.seat.duplicate .seat-name {
+  color: #6f1e17;
 }
 
 .seat.just-assigned {
@@ -697,6 +736,58 @@ button {
   font-weight: 800;
 }
 
+.drop-overlay {
+  position: fixed;
+  z-index: 70;
+  inset: 14px;
+  display: grid;
+  place-items: center;
+  border: 3px dashed rgb(13 169 214 / 76%);
+  border-radius: 20px;
+  background: rgb(10 18 26 / 88%);
+  box-shadow: 0 0 0 14px rgb(10 18 26 / 38%);
+  pointer-events: none;
+  animation: drop-in 150ms ease-out;
+}
+
+.drop-overlay[hidden] {
+  display: none;
+}
+
+.drop-message {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  color: #fff;
+  text-align: center;
+}
+
+.drop-message svg {
+  width: 48px;
+  height: 48px;
+  padding: 10px;
+  border-radius: 14px;
+  color: #062a36;
+  background: var(--accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.drop-message strong {
+  font-size: clamp(22px, 3vw, 38px);
+  letter-spacing: -0.04em;
+}
+
+.drop-message span {
+  color: #9fdced;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
 .toast-region {
   position: fixed;
   z-index: 80;
@@ -790,6 +881,15 @@ button {
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes drop-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 1180px) {
