@@ -134,14 +134,15 @@
           seatName.spellcheck = false;
           seatName.placeholder = "이름";
           seatName.setAttribute("aria-label", `${code} 자리 이름`);
-          seatName.addEventListener("change", (event) => updateNameFromSeat(code, event.target.value));
+          seatName.addEventListener("blur", (event) => updateNameFromSeat(code, event.target.value));
           seatName.addEventListener("keydown", (event) => {
             if (event.key === "Enter") {
               event.preventDefault();
               event.currentTarget.blur();
             } else if (event.key === "Escape") {
               event.preventDefault();
-              refreshAssignments();
+              const { assignments } = calculateState();
+              event.currentTarget.value = assignments.get(code)?.name ?? "";
               event.currentTarget.blur();
             }
           });
