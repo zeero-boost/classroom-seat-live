@@ -15,6 +15,22 @@
     messagingSenderId: "673249926315",
     appId: "1:673249926315:web:0fa00111cc2196da016bee",
   };
+  const KOREAN_SEAT_KEYS = Object.freeze({
+    "ㅁ": "A",
+    "ㅠ": "B",
+    "ㅊ": "C",
+    "ㅇ": "D",
+    "ㄷ": "E",
+    "ㄹ": "F",
+    "ㅎ": "G",
+    "ㅗ": "H",
+    "ㅑ": "I",
+    "ㅓ": "J",
+    "ㅏ": "K",
+    "ㅣ": "L",
+    "ㅡ": "M",
+    "ㅜ": "N",
+  });
   const roomIdFromUrl = new URLSearchParams(window.location.search).get("room") || "";
   const isViewerMode = /^[a-f0-9]{32}$/i.test(roomIdFromUrl);
 
@@ -108,6 +124,7 @@
     return String(value ?? "")
       .trim()
       .toUpperCase()
+      .replace(/[ㅁㅠㅊㅇㄷㄹㅎㅗㅑㅓㅏㅣㅡㅜ]/g, (key) => KOREAN_SEAT_KEYS[key])
       .replace(/\s+/g, "");
   }
 
