@@ -474,7 +474,11 @@
       syncInputsFromState();
       saveLocal();
       dom.rosterScroll.scrollTop = 0;
-      addToast(`${Math.min(importedRows.length, MAX_STUDENTS)}명의 명단을 불러왔습니다.`);
+      if (importedRows.length > MAX_STUDENTS) {
+        addToast(`PDF에서 ${importedRows.length}명을 찾았습니다. 최대 ${MAX_STUDENTS}명까지만 불러왔고 ${importedRows.length - MAX_STUDENTS}명은 제외했습니다.`);
+      } else {
+        addToast(`${importedRows.length}명의 명단을 불러왔습니다.`);
+      }
     } catch (error) {
       console.error(error);
       if (error?.name === "PasswordException") {
@@ -579,12 +583,17 @@
   function extractPdfRoster(matrix) {
     const result = [];
     const ignored = /^(?:호명순서|호명명단|명단|이름|성명|학생명|학생|학번|순번|번호|자리|좌석|상태|대기|배치|페이지|과대단|과대)$/i;
+    const isRankedStudentTable = matrix.some((row) => {
+      const line = row.map((cell) => escapeText(cell)).filter(Boolean).join(" ");
+      return /순위/.test(line) && /학번/.test(line) && /(?:성명|이름)/.test(line);
+    });
 
     matrix.forEach((row) => {
       const cells = row.map((cell) => escapeText(cell)).filter(Boolean);
       if (!cells.length) return;
 
       const rawLine = cells.join(" ");
+      if (isRankedStudentTable && !/^\s*\d{1,3}\s+\d{6,12}(?:\s|$)/.test(rawLine)) return;
       const hasOrdinal = cells.some((cell) => /^\d{1,12}\s*[.)번:\-]?$/.test(cell)) || /^\s*\d{1,12}\s+/.test(rawLine);
 
       const joined = cells
