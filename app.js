@@ -45,7 +45,8 @@
     remainingCount: document.querySelector("#remainingCount"),
     saveState: document.querySelector("#saveState"),
     importButton: document.querySelector("#importButton"),
-    exportButton: document.querySelector("#exportButton"),
+    excelButton: document.querySelector("#excelButton"),
+    pdfButton: document.querySelector("#pdfButton"),
     fullscreenButton: document.querySelector("#fullscreenButton"),
     resetButton: document.querySelector("#resetButton"),
     fileInput: document.querySelector("#fileInput"),
@@ -659,29 +660,326 @@
     return result;
   }
 
+  function getDateStamp() {
+    return new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" })
+      .format(new Date())
+      .replace(/\.\s?/g, "-")
+      .replace(/-$/, "");
+  }
+
+  function getExportSnapshot() {
+    const calculated = calculateState();
+    const assignedBySeat = new Map();
+    const namedCount = rows.filter((row) => escapeText(row.name)).length;
+    const assignedCount = calculated.rowStates.filter((state) => state.type === "assigned").length;
+
+    calculated.assignments.forEach((assignment, seat) => {
+      assignedBySeat.set(seat, assignment.duplicate ? { name: "중복", duplicate: true } : { name: assignment.name, duplicate: false });
+    });
+
+    return {
+      assignedBySeat,
+      populatedRows: rows
+        .map((row, index) => ({
+          number: index + 1,
+          name: escapeText(row.name),
+          seat: normalizeSeat(row.seat),
+          status: calculated.rowStates[index].label,
+        }))
+        .filter((row) => row.name || row.seat),
+      assignedCount,
+      waitingCount: Math.max(0, namedCount - assignedCount),
+      hasProblems: calculated.rowStates.some((state) => state.type === "invalid" || state.type === "duplicate"),
+    };
+  }
+
+  function applySheetCellStyle(worksheet, address, style) {
+    if (!worksheet[address]) worksheet[address] = { t: "s", v: "" };
+    worksheet[address].s = style;
+  }
+
+  function buildSeatChartSheet(snapshot) {
+    const gridColumns = [];
+    sections.forEach((section, sectionIndex) => {
+      section.columns.forEach((column) => gridColumns.push({ type: "seat", section, column }));
+      if (sectionIndex < sections.length - 1) gridColumns.push({ type: "gap" });
+    });
+
+    const columnCount = gridColumns.length;
+    const output = Array.from({ length: 19 }, () => Array(columnCount).fill(""));
+    output[0][0] = "확정 자리표";
+    output[1][0] = `배치 ${snapshot.assignedCount}명 · 대기 ${snapshot.waitingCount}명 · 저장 ${new Date().toLocaleString("ko-KR")}`;
+
+    const merges = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: columnCount - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: columnCount - 1 } },
+    ];
+
+    let columnCursor = 0;
+    sections.forEach((section, sectionIndex) => {
+      const start = columnCursor;
+      output[3][start] = section.label;
+      merges.push({ s: { r: 3, c: start }, e: { r: 3, c: start + section.columns.length - 1 } });
+      columnCursor += section.columns.length + (sectionIndex < sections.length - 1 ? 1 : 0);
+    });
+
+    for (let row = 10; row >= 1; row -= 1) {
+      const outputRow = 4 + (10 - row);
+      gridColumns.forEach((descriptor, columnIndex) => {
+        if (descriptor.type === "gap") return;
+        const code = `${descriptor.column}${row}`;
+        if (descriptor.section.specials[code]) {
+          output[outputRow][columnIndex] = descriptor.section.specials[code];
+        } else if (descriptor.section.isSeat(descriptor.column, row)) {
+          const assignment = snapshot.assignedBySeat.get(code);
+          output[outputRow][columnIndex] = assignment ? `${code}\n${assignment.name}` : code;
+        }
+      });
+    }
+
+    output[15][0] = "창가";
+    output[15][4] = "교탁 · PC · 교수님";
+    output[15][9] = "교단";
+    output[15][13] = "앞문";
+    merges.push(
+      { s: { r: 15, c: 0 }, e: { r: 15, c: 2 } },
+      { s: { r: 15, c: 4 }, e: { r: 15, c: 7 } },
+      { s: { r: 15, c: 9 }, e: { r: 15, c: 12 } },
+      { s: { r: 15, c: 13 }, e: { r: 15, c: 16 } },
+    );
+    output[17][0] = "자리 코드는 화면과 동일하며, 중복 또는 잘못된 자리는 전체 명단 시트에서 확인할 수 있습니다.";
+    merges.push({ s: { r: 17, c: 0 }, e: { r: 17, c: columnCount - 1 } });
+
+    const worksheet = window.XLSX.utils.aoa_to_sheet(output);
+    worksheet["!merges"] = merges;
+    worksheet["!cols"] = gridColumns.map((descriptor) => ({ wch: descriptor.type === "gap" ? 2.2 : 13 }));
+    worksheet["!rows"] = Array.from({ length: 19 }, (_, index) => ({ hpt: index >= 4 && index <= 13 ? 38 : index === 0 ? 28 : 22 }));
+    worksheet["!margins"] = { left: 0.25, right: 0.25, top: 0.35, bottom: 0.35, header: 0.15, footer: 0.15 };
+    worksheet["!pageSetup"] = { orientation: "landscape", fitToWidth: 1, fitToHeight: 1, paperSize: 9 };
+    worksheet["!printArea"] = `A1:${window.XLSX.utils.encode_col(columnCount - 1)}18`;
+
+    const titleStyle = { font: { bold: true, sz: 20, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "111820" } }, alignment: { horizontal: "center", vertical: "center" } };
+    const sectionStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "1B2631" } }, alignment: { horizontal: "center", vertical: "center" } };
+    const seatStyle = { alignment: { horizontal: "center", vertical: "center", wrapText: true }, border: { top: { style: "thin", color: { rgb: "B8C0C7" } }, bottom: { style: "thin", color: { rgb: "B8C0C7" } }, left: { style: "thin", color: { rgb: "B8C0C7" } }, right: { style: "thin", color: { rgb: "B8C0C7" } } } };
+    const assignedStyle = { ...seatStyle, font: { bold: true, color: { rgb: "042C39" } }, fill: { fgColor: { rgb: "0DA9D6" } } };
+    const specialStyle = { ...seatStyle, font: { bold: true, color: { rgb: "655C48" } }, fill: { fgColor: { rgb: "EBE7DC" } } };
+    applySheetCellStyle(worksheet, "A1", titleStyle);
+    applySheetCellStyle(worksheet, "A2", { font: { color: { rgb: "53606B" } }, alignment: { horizontal: "center" } });
+    applySheetCellStyle(worksheet, "A18", { font: { italic: true, color: { rgb: "6F7A86" } } });
+
+    gridColumns.forEach((descriptor, columnIndex) => {
+      if (descriptor.type === "gap") return;
+      const column = window.XLSX.utils.encode_col(columnIndex);
+      applySheetCellStyle(worksheet, `${column}4`, sectionStyle);
+      for (let row = 10; row >= 1; row -= 1) {
+        const outputRow = 5 + (10 - row);
+        const code = `${descriptor.column}${row}`;
+        if (descriptor.section.specials[code]) applySheetCellStyle(worksheet, `${column}${outputRow}`, specialStyle);
+        else if (descriptor.section.isSeat(descriptor.column, row)) {
+          applySheetCellStyle(worksheet, `${column}${outputRow}`, snapshot.assignedBySeat.has(code) ? assignedStyle : seatStyle);
+        }
+      }
+    });
+
+    return worksheet;
+  }
+
+  function buildRosterSheet(snapshot) {
+    const output = [["순번", "이름", "자리", "상태"]];
+    snapshot.populatedRows.forEach((row) => output.push([row.number, row.name, row.seat, row.status]));
+    const worksheet = window.XLSX.utils.aoa_to_sheet(output);
+    worksheet["!cols"] = [{ wch: 8 }, { wch: 20 }, { wch: 10 }, { wch: 14 }];
+    worksheet["!autofilter"] = { ref: `A1:D${Math.max(1, output.length)}` };
+    worksheet["!freeze"] = { xSplit: 0, ySplit: 1, topLeftCell: "A2", activePane: "bottomLeft", state: "frozen" };
+    worksheet["!margins"] = { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 };
+    worksheet["!pageSetup"] = { orientation: "portrait", fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+    ["A1", "B1", "C1", "D1"].forEach((address) => applySheetCellStyle(worksheet, address, {
+      font: { bold: true, color: { rgb: "FFFFFF" } },
+      fill: { fgColor: { rgb: "111820" } },
+      alignment: { horizontal: "center", vertical: "center" },
+    }));
+    return worksheet;
+  }
+
   function exportWorkbook() {
     if (!window.XLSX) {
       addToast("엑셀 저장 도구를 불러오지 못했습니다.", "error");
       return;
     }
 
-    const output = [["순번", "이름", "자리", "상태"]];
-    const { rowStates } = calculateState();
-    rows.forEach((row, index) => {
-      if (!escapeText(row.name) && !normalizeSeat(row.seat)) return;
-      output.push([index + 1, escapeText(row.name), normalizeSeat(row.seat), rowStates[index].label]);
+    const snapshot = getExportSnapshot();
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, buildSeatChartSheet(snapshot), "확정 자리표");
+    window.XLSX.utils.book_append_sheet(workbook, buildRosterSheet(snapshot), "전체 명단");
+    window.XLSX.writeFile(workbook, `확정_자리표_${getDateStamp()}.xlsx`, { compression: true, cellStyles: true });
+    addToast(snapshot.hasProblems ? "엑셀을 저장했습니다. 중복·오류 자리를 확인해 주세요." : "확정 자리표 엑셀을 저장했습니다.", snapshot.hasProblems ? "error" : "");
+  }
+
+  function roundedRect(ctx, x, y, width, height, radius, fill, stroke, lineWidth = 1) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, radius);
+    if (fill) {
+      ctx.fillStyle = fill;
+      ctx.fill();
+    }
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+    }
+  }
+
+  function fitCanvasText(ctx, text, maxWidth, initialSize, minSize = 15) {
+    let size = initialSize;
+    do {
+      ctx.font = `900 ${size}px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif`;
+      if (ctx.measureText(text).width <= maxWidth) return size;
+      size -= 1;
+    } while (size > minSize);
+    return minSize;
+  }
+
+  function drawFinalSeatChart(snapshot) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 2100;
+    canvas.height = 1450;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#f4f6f7";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#111820";
+    ctx.fillRect(0, 0, canvas.width, 142);
+    ctx.fillStyle = "#28d7a1";
+    ctx.beginPath();
+    ctx.arc(72, 70, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 48px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+    ctx.fillText("확정 자리표", 105, 86);
+    ctx.fillStyle = "#aeb8c2";
+    ctx.font = "700 20px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`배치 ${snapshot.assignedCount}명 · 대기 ${snapshot.waitingCount}명 · ${new Date().toLocaleString("ko-KR")}`, 2030, 82);
+    ctx.textAlign = "left";
+
+    const marginX = 72;
+    const gridTop = 220;
+    const gridHeight = 980;
+    const labelHeight = 56;
+    const rowHeight = (gridHeight - labelHeight) / 10;
+    const sectionGap = 26;
+    const usableWidth = canvas.width - marginX * 2 - sectionGap * 3;
+    const unitWidth = usableWidth / 14;
+    let sectionX = marginX;
+
+    ctx.textAlign = "center";
+    sections.forEach((section) => {
+      const sectionWidth = unitWidth * section.columns.length;
+      ctx.fillStyle = "#111820";
+      ctx.fillRect(sectionX, gridTop - 6, sectionWidth, 6);
+
+      for (let row = 10; row >= 1; row -= 1) {
+        const rowIndex = 10 - row;
+        section.columns.forEach((column, columnIndex) => {
+          const code = `${column}${row}`;
+          const x = sectionX + columnIndex * unitWidth;
+          const y = gridTop + rowIndex * rowHeight;
+
+          if (section.specials[code]) {
+            ctx.fillStyle = "#ebe7dc";
+            ctx.fillRect(x, y, unitWidth, rowHeight);
+            ctx.strokeStyle = "#b8c0c7";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, unitWidth, rowHeight);
+            ctx.fillStyle = "#655c48";
+            ctx.font = "850 19px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+            ctx.fillText(section.specials[code], x + unitWidth / 2, y + rowHeight / 2 + 7);
+            return;
+          }
+
+          if (!section.isSeat(column, row)) return;
+          const assignment = snapshot.assignedBySeat.get(code);
+          ctx.fillStyle = assignment?.duplicate ? "#ffb8b1" : assignment ? "#0da9d6" : "#ffffff";
+          ctx.fillRect(x, y, unitWidth, rowHeight);
+          ctx.strokeStyle = assignment ? "#178eb0" : "#b8c0c7";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x, y, unitWidth, rowHeight);
+
+          if (assignment) {
+            ctx.textAlign = "right";
+            ctx.fillStyle = assignment.duplicate ? "#7a2119" : "rgba(4,44,57,.62)";
+            ctx.font = "800 15px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+            ctx.fillText(code, x + unitWidth - 9, y + 19);
+            ctx.textAlign = "center";
+            ctx.fillStyle = assignment.duplicate ? "#6f1e17" : "#042c39";
+            fitCanvasText(ctx, assignment.name, unitWidth - 18, 27);
+            ctx.fillText(assignment.name, x + unitWidth / 2, y + rowHeight / 2 + 10);
+          } else {
+            ctx.fillStyle = "#38434e";
+            ctx.font = "850 20px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+            ctx.fillText(code, x + unitWidth / 2, y + rowHeight / 2 + 7);
+          }
+        });
+      }
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(sectionX, gridTop + rowHeight * 10, sectionWidth, labelHeight);
+      ctx.strokeStyle = "#b8c0c7";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sectionX, gridTop + rowHeight * 10, sectionWidth, labelHeight);
+      ctx.fillStyle = "#4e5964";
+      ctx.font = "850 22px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+      ctx.fillText(section.label, sectionX + sectionWidth / 2, gridTop + rowHeight * 10 + 36);
+      sectionX += sectionWidth + sectionGap;
     });
 
-    const worksheet = window.XLSX.utils.aoa_to_sheet(output);
-    worksheet["!cols"] = [{ wch: 8 }, { wch: 18 }, { wch: 10 }, { wch: 10 }];
-    const workbook = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(workbook, worksheet, "자리배치 결과");
-    const stamp = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit" })
-      .format(new Date())
-      .replace(/\.\s?/g, "-")
-      .replace(/-$/, "");
-    window.XLSX.writeFile(workbook, `자리배치_결과_${stamp}.xlsx`);
-    addToast("자리배치 결과를 저장했습니다.");
+    const frontY = 1270;
+    const frontGap = 26;
+    const frontWidth = (canvas.width - marginX * 2 - frontGap * 3) / 4;
+    ["창가", "교탁 · PC · 교수님", "교단", "앞문"].forEach((label, index) => {
+      const x = marginX + index * (frontWidth + frontGap);
+      roundedRect(ctx, x, frontY, frontWidth, 82, 8, "#ffffff", "#b9c1c8", 2);
+      ctx.fillStyle = "#515c66";
+      ctx.font = "800 21px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(label, x + frontWidth / 2, frontY + 50);
+    });
+
+    ctx.fillStyle = "#6f7a86";
+    ctx.font = "650 16px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("자리배치 LIVE에서 생성", marginX, 1410);
+    ctx.textAlign = "right";
+    ctx.fillText(snapshot.hasProblems ? "주의: 중복 또는 잘못된 자리 입력이 포함되어 있습니다." : "최종 확인용", canvas.width - marginX, 1410);
+    return canvas;
+  }
+
+  function exportPdf() {
+    const jsPDF = window.jspdf?.jsPDF;
+    if (!jsPDF) {
+      addToast("PDF 저장 도구를 불러오지 못했습니다.", "error");
+      return;
+    }
+
+    dom.pdfButton.disabled = true;
+    dom.pdfButton.classList.add("is-loading");
+    window.setTimeout(() => {
+      try {
+        const snapshot = getExportSnapshot();
+        const canvas = drawFinalSeatChart(snapshot);
+        const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
+        pdf.setProperties({ title: "확정 자리표", subject: "자리배치 LIVE 최종 자리표", creator: "자리배치 LIVE" });
+        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 8, 8, 281, 194, undefined, "FAST");
+        pdf.save(`확정_자리표_${getDateStamp()}.pdf`);
+        addToast(snapshot.hasProblems ? "PDF를 저장했습니다. 중복·오류 자리를 확인해 주세요." : "확정 자리표 PDF를 저장했습니다.", snapshot.hasProblems ? "error" : "");
+      } catch (error) {
+        console.error(error);
+        addToast("PDF를 만드는 중 오류가 발생했습니다.", "error");
+      } finally {
+        dom.pdfButton.disabled = false;
+        dom.pdfButton.classList.remove("is-loading");
+      }
+    }, 30);
   }
 
   function addToast(message, type = "") {
@@ -769,7 +1067,8 @@
       const [file] = dom.fileInput.files;
       if (file) importFile(file);
     });
-    dom.exportButton.addEventListener("click", exportWorkbook);
+    dom.excelButton.addEventListener("click", exportWorkbook);
+    dom.pdfButton.addEventListener("click", exportPdf);
     dom.fullscreenButton.addEventListener("click", toggleFullscreen);
     dom.resetButton.addEventListener("click", () => dom.resetDialog.showModal());
     dom.resetDialog.addEventListener("close", () => {

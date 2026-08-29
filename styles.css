@@ -68,7 +68,7 @@ button {
   position: relative;
   z-index: 20;
   display: grid;
-  grid-template-columns: minmax(230px, 1fr) auto minmax(420px, 1fr);
+  grid-template-columns: minmax(210px, 1fr) auto minmax(540px, 1fr);
   align-items: center;
   gap: 24px;
   padding: 0 24px;
@@ -214,6 +214,11 @@ button {
 
 .button.is-loading svg {
   animation: spin 900ms linear infinite;
+}
+
+#excelButton,
+#pdfButton {
+  min-width: 96px;
 }
 
 .icon-button {
