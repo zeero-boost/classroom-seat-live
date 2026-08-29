@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const MAX_STUDENTS = 130;
+  const MAX_STUDENTS = 150;
   const STORAGE_KEY = "classroom-seat-live-v1";
   const ROSTER_WIDTH_KEY = "classroom-seat-live-roster-width";
   const DEFAULT_ROSTER_WIDTH = 400;
