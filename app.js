@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const MAX_STUDENTS = 125;
+  const MAX_STUDENTS = 130;
   const STORAGE_KEY = "classroom-seat-live-v1";
   const ROSTER_WIDTH_KEY = "classroom-seat-live-roster-width";
   const DEFAULT_ROSTER_WIDTH = 400;
@@ -263,7 +263,7 @@
       } else {
         const blankIndex = rows.findIndex((row) => !escapeText(row.name) && !normalizeSeat(row.seat));
         if (blankIndex === -1) {
-          addToast("명단 125칸이 모두 사용 중입니다.", "error");
+          addToast(`명단 ${MAX_STUDENTS}칸이 모두 사용 중입니다.`, "error");
           refreshAssignments();
           return;
         }
@@ -516,8 +516,8 @@
 
   async function loadPdfJs() {
     if (!pdfJsPromise) {
-      pdfJsPromise = import("./pdf.min.mjs").then((pdfjsLib) => {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("./pdf.worker.min.mjs", window.location.href).href;
+      pdfJsPromise = import("./pdf.min.mjs?v=20260829-7").then((pdfjsLib) => {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("./pdf.worker.min.mjs?v=20260829-7", window.location.href).href;
         return pdfjsLib;
       });
     }
