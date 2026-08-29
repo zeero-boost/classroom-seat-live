@@ -36,5 +36,5 @@ PDF는 텍스트가 들어 있는 명단을 읽습니다. 스캔 사진만 들�
 
 - SheetJS Community Edition 0.20.3 (`xlsx.full.min.js`) — 엑셀 명단 읽기
 - ExcelJS 4.4.0 (`exceljs.min.js`) — 원본 서식을 유지한 확정 자리표 저장
-- Mozilla PDF.js 6.2.108 (`pdf.min.mjs`, `pdf.worker.min.mjs`) — PDF 텍스트 읽기
+- Mozilla PDF.js 3.11.174 (`pdf.min.js`, `pdf.worker.min.js`) — Safari 호환 PDF 텍스트 읽기
 - jsPDF 4.2.1 (`jspdf.umd.min.js`) — 확정 자리표 PDF 저장

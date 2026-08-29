@@ -516,8 +516,10 @@
 
   async function loadPdfJs() {
     if (!pdfJsPromise) {
-      pdfJsPromise = import("./pdf.min.mjs?v=20260829-7").then((pdfjsLib) => {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("./pdf.worker.min.mjs?v=20260829-7", window.location.href).href;
+      pdfJsPromise = Promise.resolve().then(() => {
+        const pdfjsLib = window.pdfjsLib;
+        if (!pdfjsLib) throw new Error("PDF 읽기 도구를 불러오지 못했습니다.");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("./pdf.worker.min.js?v=20260829-8", window.location.href).href;
         return pdfjsLib;
       });
     }
