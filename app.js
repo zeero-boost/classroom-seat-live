@@ -696,126 +696,78 @@
     };
   }
 
-  function applySheetCellStyle(worksheet, address, style) {
-    if (!worksheet[address]) worksheet[address] = { t: "s", v: "" };
-    worksheet[address].s = style;
-  }
+  async function buildReferenceStyleWorkbook(snapshot) {
+    const response = await fetch("./seat-layout-template.xlsx", { cache: "no-store" });
+    if (!response.ok) throw new Error(`자리표 서식 파일을 불러오지 못했습니다. (${response.status})`);
 
-  function buildSeatChartSheet(snapshot) {
-    const gridColumns = [];
-    sections.forEach((section, sectionIndex) => {
-      section.columns.forEach((column) => gridColumns.push({ type: "seat", section, column }));
-      if (sectionIndex < sections.length - 1) gridColumns.push({ type: "gap" });
-    });
+    const workbook = new window.ExcelJS.Workbook();
+    await workbook.xlsx.load(await response.arrayBuffer());
+    const worksheet = workbook.worksheets[0];
+    worksheet.name = "확정 자리표";
 
-    const columnCount = gridColumns.length;
-    const output = Array.from({ length: 19 }, () => Array(columnCount).fill(""));
-    output[0][0] = "확정 자리표";
-    output[1][0] = `배치 ${snapshot.assignedCount}명 · 대기 ${snapshot.waitingCount}명 · 저장 ${new Date().toLocaleString("ko-KR")}`;
-
-    const merges = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: columnCount - 1 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: columnCount - 1 } },
-    ];
-
-    let columnCursor = 0;
-    sections.forEach((section, sectionIndex) => {
-      const start = columnCursor;
-      output[3][start] = section.label;
-      merges.push({ s: { r: 3, c: start }, e: { r: 3, c: start + section.columns.length - 1 } });
-      columnCursor += section.columns.length + (sectionIndex < sections.length - 1 ? 1 : 0);
-    });
-
-    for (let row = 10; row >= 1; row -= 1) {
-      const outputRow = 4 + (10 - row);
-      gridColumns.forEach((descriptor, columnIndex) => {
-        if (descriptor.type === "gap") return;
-        const code = `${descriptor.column}${row}`;
-        if (descriptor.section.specials[code]) {
-          output[outputRow][columnIndex] = descriptor.section.specials[code];
-        } else if (descriptor.section.isSeat(descriptor.column, row)) {
-          const assignment = snapshot.assignedBySeat.get(code);
-          output[outputRow][columnIndex] = assignment ? `${code}\n${assignment.name}` : code;
-        }
+    worksheet.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const seat = normalizeSeat(cell.value);
+        if (!validSeats.has(seat)) return;
+        const assignment = snapshot.assignedBySeat.get(seat);
+        cell.value = assignment?.name || seat;
       });
-    }
-
-    output[15][0] = "창가";
-    output[15][4] = "교탁 · PC · 교수님";
-    output[15][9] = "교단";
-    output[15][13] = "앞문";
-    merges.push(
-      { s: { r: 15, c: 0 }, e: { r: 15, c: 2 } },
-      { s: { r: 15, c: 4 }, e: { r: 15, c: 7 } },
-      { s: { r: 15, c: 9 }, e: { r: 15, c: 12 } },
-      { s: { r: 15, c: 13 }, e: { r: 15, c: 16 } },
-    );
-    output[17][0] = "자리 코드는 화면과 동일하며, 중복 또는 잘못된 자리는 전체 명단 시트에서 확인할 수 있습니다.";
-    merges.push({ s: { r: 17, c: 0 }, e: { r: 17, c: columnCount - 1 } });
-
-    const worksheet = window.XLSX.utils.aoa_to_sheet(output);
-    worksheet["!merges"] = merges;
-    worksheet["!cols"] = gridColumns.map((descriptor) => ({ wch: descriptor.type === "gap" ? 2.2 : 13 }));
-    worksheet["!rows"] = Array.from({ length: 19 }, (_, index) => ({ hpt: index >= 4 && index <= 13 ? 38 : index === 0 ? 28 : 22 }));
-    worksheet["!margins"] = { left: 0.25, right: 0.25, top: 0.35, bottom: 0.35, header: 0.15, footer: 0.15 };
-    worksheet["!pageSetup"] = { orientation: "landscape", fitToWidth: 1, fitToHeight: 1, paperSize: 9 };
-    worksheet["!printArea"] = `A1:${window.XLSX.utils.encode_col(columnCount - 1)}18`;
-
-    const titleStyle = { font: { bold: true, sz: 20, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "111820" } }, alignment: { horizontal: "center", vertical: "center" } };
-    const sectionStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "1B2631" } }, alignment: { horizontal: "center", vertical: "center" } };
-    const seatStyle = { alignment: { horizontal: "center", vertical: "center", wrapText: true }, border: { top: { style: "thin", color: { rgb: "B8C0C7" } }, bottom: { style: "thin", color: { rgb: "B8C0C7" } }, left: { style: "thin", color: { rgb: "B8C0C7" } }, right: { style: "thin", color: { rgb: "B8C0C7" } } } };
-    const assignedStyle = { ...seatStyle, font: { bold: true, color: { rgb: "042C39" } }, fill: { fgColor: { rgb: "0DA9D6" } } };
-    const specialStyle = { ...seatStyle, font: { bold: true, color: { rgb: "655C48" } }, fill: { fgColor: { rgb: "EBE7DC" } } };
-    applySheetCellStyle(worksheet, "A1", titleStyle);
-    applySheetCellStyle(worksheet, "A2", { font: { color: { rgb: "53606B" } }, alignment: { horizontal: "center" } });
-    applySheetCellStyle(worksheet, "A18", { font: { italic: true, color: { rgb: "6F7A86" } } });
-
-    gridColumns.forEach((descriptor, columnIndex) => {
-      if (descriptor.type === "gap") return;
-      const column = window.XLSX.utils.encode_col(columnIndex);
-      applySheetCellStyle(worksheet, `${column}4`, sectionStyle);
-      for (let row = 10; row >= 1; row -= 1) {
-        const outputRow = 5 + (10 - row);
-        const code = `${descriptor.column}${row}`;
-        if (descriptor.section.specials[code]) applySheetCellStyle(worksheet, `${column}${outputRow}`, specialStyle);
-        else if (descriptor.section.isSeat(descriptor.column, row)) {
-          applySheetCellStyle(worksheet, `${column}${outputRow}`, snapshot.assignedBySeat.has(code) ? assignedStyle : seatStyle);
-        }
-      }
     });
 
-    return worksheet;
+    const roster = workbook.addWorksheet("전체 명단", {
+      views: [{ state: "frozen", ySplit: 1 }],
+      pageSetup: { orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 },
+      pageMargins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
+    });
+    roster.columns = [
+      { header: "순번", key: "number", width: 8 },
+      { header: "이름", key: "name", width: 20 },
+      { header: "자리", key: "seat", width: 10 },
+      { header: "상태", key: "status", width: 14 },
+    ];
+    snapshot.populatedRows.forEach((row) => roster.addRow(row));
+    roster.autoFilter = { from: "A1", to: `D${Math.max(1, roster.rowCount)}` };
+    roster.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF111820" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+    });
+    return workbook;
   }
 
-  function buildRosterSheet(snapshot) {
-    const output = [["순번", "이름", "자리", "상태"]];
-    snapshot.populatedRows.forEach((row) => output.push([row.number, row.name, row.seat, row.status]));
-    const worksheet = window.XLSX.utils.aoa_to_sheet(output);
-    worksheet["!cols"] = [{ wch: 8 }, { wch: 20 }, { wch: 10 }, { wch: 14 }];
-    worksheet["!autofilter"] = { ref: `A1:D${Math.max(1, output.length)}` };
-    worksheet["!freeze"] = { xSplit: 0, ySplit: 1, topLeftCell: "A2", activePane: "bottomLeft", state: "frozen" };
-    worksheet["!margins"] = { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 };
-    worksheet["!pageSetup"] = { orientation: "portrait", fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
-    ["A1", "B1", "C1", "D1"].forEach((address) => applySheetCellStyle(worksheet, address, {
-      font: { bold: true, color: { rgb: "FFFFFF" } },
-      fill: { fgColor: { rgb: "111820" } },
-      alignment: { horizontal: "center", vertical: "center" },
-    }));
-    return worksheet;
+  function downloadExcelBuffer(buffer, fileName) {
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function exportWorkbook() {
-    if (!window.XLSX) {
+  async function exportWorkbook() {
+    if (!window.ExcelJS) {
       addToast("엑셀 저장 도구를 불러오지 못했습니다.", "error");
       return;
     }
 
     const snapshot = getExportSnapshot();
-    const workbook = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(workbook, buildSeatChartSheet(snapshot), "확정 자리표");
-    window.XLSX.utils.book_append_sheet(workbook, buildRosterSheet(snapshot), "전체 명단");
-    window.XLSX.writeFile(workbook, `확정_자리표_${getDateStamp()}.xlsx`, { compression: true, cellStyles: true });
-    addToast(snapshot.hasProblems ? "엑셀을 저장했습니다. 중복·오류 자리를 확인해 주세요." : "확정 자리표 엑셀을 저장했습니다.", snapshot.hasProblems ? "error" : "");
+    dom.excelButton.disabled = true;
+    dom.excelButton.setAttribute("aria-busy", "true");
+
+    try {
+      const workbook = await buildReferenceStyleWorkbook(snapshot);
+      downloadExcelBuffer(await workbook.xlsx.writeBuffer(), `확정_자리표_${getDateStamp()}.xlsx`);
+      addToast(snapshot.hasProblems ? "엑셀을 저장했습니다. 중복·오류 자리를 확인해 주세요." : "첨부 형식으로 엑셀을 저장했습니다.", snapshot.hasProblems ? "error" : "");
+    } catch (error) {
+      console.error(error);
+      addToast("엑셀 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.", "error");
+    } finally {
+      dom.excelButton.disabled = false;
+      dom.excelButton.removeAttribute("aria-busy");
+    }
   }
 
   function roundedRect(ctx, x, y, width, height, radius, fill, stroke, lineWidth = 1) {
