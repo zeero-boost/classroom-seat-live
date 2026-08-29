@@ -14,6 +14,7 @@
   --danger-soft: #fff0ee;
   --success: #087f5b;
   --warning: #c67605;
+  --roster-width: clamp(350px, 27vw, 450px);
   --shadow: 0 20px 50px rgb(14 24 34 / 10%);
   --radius: 14px;
   font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
@@ -242,7 +243,61 @@ button {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(350px, 27vw, 450px);
+  grid-template-columns: minmax(0, 1fr) 9px var(--roster-width);
+}
+
+.panel-resizer {
+  position: relative;
+  z-index: 12;
+  min-width: 9px;
+  outline: 0;
+  cursor: col-resize;
+  touch-action: none;
+  background: #eef1f3;
+}
+
+.panel-resizer::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 1px;
+  background: #c6ced4;
+  transform: translateX(-50%);
+  transition: width 140ms ease, background 140ms ease;
+}
+
+.panel-resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 34px;
+  border-radius: 99px;
+  background: #87939d;
+  box-shadow: 0 -7px 0 #87939d, 0 7px 0 #87939d;
+  opacity: 0;
+  transform: translate(-50%, -50%) scaleY(0.72);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.panel-resizer:hover::before,
+.panel-resizer:focus-visible::before,
+body.panel-resizing .panel-resizer::before {
+  width: 3px;
+  background: var(--accent);
+}
+
+.panel-resizer:hover::after,
+.panel-resizer:focus-visible::after,
+body.panel-resizing .panel-resizer::after {
+  opacity: 1;
+  transform: translate(-50%, -50%) scaleY(1);
+}
+
+body.panel-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .seat-panel {
@@ -924,9 +979,6 @@ button {
     color: #062a36;
   }
 
-  .workspace {
-    grid-template-columns: minmax(0, 1fr) 350px;
-  }
 }
 
 @media (max-width: 900px) {
@@ -954,6 +1006,10 @@ button {
 
   .workspace {
     display: block;
+  }
+
+  .panel-resizer {
+    display: none;
   }
 
   .seat-panel {

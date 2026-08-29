@@ -3,6 +3,8 @@
 
   const MAX_STUDENTS = 125;
   const STORAGE_KEY = "classroom-seat-live-v1";
+  const ROSTER_WIDTH_KEY = "classroom-seat-live-roster-width";
+  const DEFAULT_ROSTER_WIDTH = 400;
 
   const sections = [
     {
@@ -60,6 +62,7 @@
     toastRegion: document.querySelector("#toastRegion"),
     resetDialog: document.querySelector("#resetDialog"),
     dropOverlay: document.querySelector("#dropOverlay"),
+    panelResizer: document.querySelector("#panelResizer"),
   };
 
   let rows = createBlankRows();
@@ -1061,6 +1064,77 @@
     window.addEventListener("blur", hideDropOverlay);
   }
 
+  function getRosterWidthLimits() {
+    const min = 320;
+    const max = Math.max(min, Math.min(600, Math.round(window.innerWidth * 0.48)));
+    return { min, max };
+  }
+
+  function applyRosterWidth(width, save = false) {
+    if (window.innerWidth <= 900) return;
+    const { min, max } = getRosterWidthLimits();
+    const nextWidth = Math.min(max, Math.max(min, Math.round(Number(width) || DEFAULT_ROSTER_WIDTH)));
+    document.documentElement.style.setProperty("--roster-width", `${nextWidth}px`);
+    dom.panelResizer.setAttribute("aria-valuemin", String(min));
+    dom.panelResizer.setAttribute("aria-valuemax", String(max));
+    dom.panelResizer.setAttribute("aria-valuenow", String(nextWidth));
+    if (save) localStorage.setItem(ROSTER_WIDTH_KEY, String(nextWidth));
+  }
+
+  function loadRosterWidth() {
+    const savedWidth = Number(localStorage.getItem(ROSTER_WIDTH_KEY));
+    applyRosterWidth(Number.isFinite(savedWidth) && savedWidth > 0 ? savedWidth : DEFAULT_ROSTER_WIDTH);
+  }
+
+  function bindPanelResizer() {
+    let dragging = false;
+
+    const finishResize = () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("panel-resizing");
+      applyRosterWidth(Number(dom.panelResizer.getAttribute("aria-valuenow")), true);
+    };
+
+    dom.panelResizer.addEventListener("pointerdown", (event) => {
+      if (window.innerWidth <= 900) return;
+      event.preventDefault();
+      dom.panelResizer.focus();
+      dragging = true;
+      document.body.classList.add("panel-resizing");
+      dom.panelResizer.setPointerCapture?.(event.pointerId);
+    });
+
+    window.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      applyRosterWidth(window.innerWidth - event.clientX);
+    });
+    window.addEventListener("pointerup", finishResize);
+    window.addEventListener("pointercancel", finishResize);
+
+    dom.panelResizer.addEventListener("dblclick", () => {
+      applyRosterWidth(DEFAULT_ROSTER_WIDTH, true);
+      addToast("호명 순서 칸 너비를 기본값으로 되돌렸습니다.");
+    });
+
+    dom.panelResizer.addEventListener("keydown", (event) => {
+      const current = Number(dom.panelResizer.getAttribute("aria-valuenow")) || DEFAULT_ROSTER_WIDTH;
+      const { min, max } = getRosterWidthLimits();
+      let nextWidth = current;
+      if (event.key === "ArrowLeft") nextWidth += 20;
+      else if (event.key === "ArrowRight") nextWidth -= 20;
+      else if (event.key === "Home") nextWidth = min;
+      else if (event.key === "End") nextWidth = max;
+      else return;
+      event.preventDefault();
+      applyRosterWidth(nextWidth, true);
+    });
+
+    window.addEventListener("resize", () => {
+      if (window.innerWidth > 900) loadRosterWidth();
+    });
+  }
+
   function bindEvents() {
     dom.importButton.addEventListener("click", () => dom.fileInput.click());
     dom.fileInput.addEventListener("change", () => {
@@ -1080,9 +1154,11 @@
       dom.fullscreenButton.setAttribute("aria-label", dom.fullscreenButton.title);
     });
     bindFileDrop();
+    bindPanelResizer();
   }
 
   loadLocal();
+  loadRosterWidth();
   buildSeatMap();
   buildRoster();
   bindEvents();
