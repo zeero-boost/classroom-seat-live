@@ -53,7 +53,7 @@
       label: "3분단",
       columns: ["H", "I", "J", "K"],
       specials: {},
-      isSeat: (column, row) => row <= 9 || (row === 10 && (column === "H" || column === "K")),
+      isSeat: (column, row) => row <= 9 || (row === 10 && column === "K"),
     },
     {
       label: "4분단",
@@ -796,6 +796,10 @@
         cell.value = assignment?.name || seat;
       });
     });
+
+    const removedH10Cell = worksheet.getCell("L3");
+    removedH10Cell.value = null;
+    removedH10Cell.style = JSON.parse(JSON.stringify(worksheet.getCell("M3").style));
 
     const b1Cell = worksheet.getCell("D12");
     b1Cell.value = "빈자리";
