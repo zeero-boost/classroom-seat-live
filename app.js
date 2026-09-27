@@ -40,7 +40,7 @@
     {
       label: "1분단",
       columns: ["A", "B", "C"],
-      specials: { C10: "과대단", C2: "과대단", C1: "과대" },
+      specials: { C10: "과대단", C2: "과대단", B1: "빈자리", C1: "과대" },
       isSeat: (column, row) => row <= 9 && !(column === "C" && row === 2),
     },
     {
@@ -443,7 +443,7 @@
     const state = rowStates[index];
     const seat = normalizeSeat(rows[index].seat);
     if (state.type === "invalid" && seat && !validSeats.has(seat)) {
-      addToast(`${seat}는 자리표에 없는 코드입니다.`, "error");
+      addToast(seat === "B1" ? "B1은 비워 두는 자리라 배정할 수 없습니다." : `${seat}는 자리표에 없는 코드입니다.`, "error");
     } else if (state.type === "duplicate") {
       addToast(`${seat} 자리가 두 번 입력됐습니다.`, "error");
     }
@@ -796,6 +796,10 @@
         cell.value = assignment?.name || seat;
       });
     });
+
+    const b1Cell = worksheet.getCell("D12");
+    b1Cell.value = "빈자리";
+    b1Cell.style = JSON.parse(JSON.stringify(fixedRoleStyle));
 
     const c1Cell = worksheet.getCell("E12");
     c1Cell.value = "과대";
