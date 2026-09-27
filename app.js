@@ -40,14 +40,14 @@
     {
       label: "1분단",
       columns: ["A", "B", "C"],
-      specials: { C10: "과대단", C2: "과대단" },
+      specials: { C10: "과대단", C2: "과대단", C1: "과대" },
       isSeat: (column, row) => row <= 9 && !(column === "C" && row === 2),
     },
     {
       label: "2분단",
       columns: ["D", "E", "F", "G"],
-      specials: { D1: "과대" },
-      isSeat: (column, row) => (row >= 2 && row <= 9) || (row === 10 && column === "G") || (row === 1 && column !== "D"),
+      specials: {},
+      isSeat: (column, row) => row <= 9 || (row === 10 && column === "G"),
     },
     {
       label: "3분단",
@@ -62,12 +62,14 @@
       isSeat: (column, row) => (row >= 2 && row <= 9) || (row === 1 && column !== "L"),
     },
   ];
+  const representativeSeats = new Set(["D1", "E1", "F1", "G1", "H1", "I1", "J1", "K1"]);
 
   const validSeats = new Set();
   for (const section of sections) {
     for (let row = 10; row >= 1; row -= 1) {
       for (const column of section.columns) {
-        if (section.isSeat(column, row)) validSeats.add(`${column}${row}`);
+        const code = `${column}${row}`;
+        if (section.isSeat(column, row) && !section.specials[code]) validSeats.add(code);
       }
     }
   }
@@ -171,9 +173,14 @@
           const seat = document.createElement("div");
           seat.className = "seat";
           seat.dataset.seat = code;
+          if (representativeSeats.has(code)) seat.classList.add("representative-seat");
           const seatCode = document.createElement("span");
           seatCode.className = "seat-code";
           seatCode.textContent = code;
+
+          const seatRole = document.createElement("span");
+          seatRole.className = "seat-role";
+          seatRole.textContent = "대표학생";
 
           const seatName = document.createElement("input");
           seatName.className = "seat-name";
@@ -184,7 +191,7 @@
           seatName.placeholder = "이름";
           seatName.readOnly = isViewerMode;
           if (isViewerMode) seatName.tabIndex = -1;
-          seatName.setAttribute("aria-label", `${code} 자리 이름`);
+          seatName.setAttribute("aria-label", representativeSeats.has(code) ? `${code} 대표학생 자리 이름` : `${code} 자리 이름`);
           seatName.addEventListener("blur", (event) => updateNameFromSeat(code, event.target.value));
           seatName.addEventListener("keydown", (event) => {
             if (event.key === "Enter") {
@@ -198,7 +205,11 @@
             }
           });
 
-          seat.append(seatCode, seatName);
+          if (representativeSeats.has(code)) {
+            seat.append(seatCode, seatRole, seatName);
+          } else {
+            seat.append(seatCode, seatName);
+          }
           rowEl.append(seat);
         });
 
@@ -378,7 +389,8 @@
       seatEl.classList.toggle("assigned", Boolean(assignment));
       seatEl.classList.toggle("duplicate", Boolean(assignment?.duplicate));
       if (document.activeElement !== nameEl) nameEl.value = assignment?.name ?? "";
-      nameEl.setAttribute("aria-label", assignment ? `${code} 자리 ${assignment.name}` : `${code} 자리 이름`);
+      const roleLabel = representativeSeats.has(code) ? "대표학생 자리" : "자리";
+      nameEl.setAttribute("aria-label", assignment ? `${code} ${roleLabel} ${assignment.name}` : `${code} ${roleLabel} 이름`);
 
       if (assignment && previous !== assignment.name) {
         seatEl.classList.remove("just-assigned");
@@ -773,6 +785,8 @@
     await workbook.xlsx.load(await response.arrayBuffer());
     const worksheet = workbook.worksheets[0];
     worksheet.name = "확정 자리표";
+    const fixedRoleStyle = JSON.parse(JSON.stringify(worksheet.getCell("G12").style));
+    const representativeStyle = JSON.parse(JSON.stringify(worksheet.getCell("H12").style));
 
     worksheet.eachRow({ includeEmpty: false }, (row) => {
       row.eachCell({ includeEmpty: false }, (cell) => {
@@ -782,6 +796,15 @@
         cell.value = assignment?.name || seat;
       });
     });
+
+    const c1Cell = worksheet.getCell("E12");
+    c1Cell.value = "과대";
+    c1Cell.style = fixedRoleStyle;
+
+    const d1Cell = worksheet.getCell("G12");
+    const d1Assignment = snapshot.assignedBySeat.get("D1");
+    d1Cell.value = d1Assignment?.name || "D1";
+    d1Cell.style = representativeStyle;
 
     const roster = workbook.addWorksheet("전체 명단", {
       views: [{ state: "frozen", ySplit: 1 }],
@@ -923,17 +946,30 @@
 
           if (!section.isSeat(column, row)) return;
           const assignment = snapshot.assignedBySeat.get(code);
-          ctx.fillStyle = assignment?.duplicate ? "#ffb8b1" : assignment ? "#0da9d6" : "#ffffff";
+          const isRepresentative = representativeSeats.has(code);
+          ctx.fillStyle = assignment?.duplicate ? "#ffb8b1" : assignment ? "#0da9d6" : isRepresentative ? "#eaf8fc" : "#ffffff";
           ctx.fillRect(x, y, unitWidth, rowHeight);
-          ctx.strokeStyle = assignment ? "#178eb0" : "#b8c0c7";
+          ctx.strokeStyle = assignment || isRepresentative ? "#178eb0" : "#b8c0c7";
           ctx.lineWidth = 2;
           ctx.strokeRect(x, y, unitWidth, rowHeight);
 
-          if (assignment) {
+          if (isRepresentative) {
+            ctx.textAlign = "left";
+            ctx.fillStyle = assignment ? "rgba(4,44,57,.72)" : "#19718d";
+            ctx.font = "800 13px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+            ctx.fillText("대표학생", x + 8, y + 17);
             ctx.textAlign = "right";
-            ctx.fillStyle = assignment.duplicate ? "#7a2119" : "rgba(4,44,57,.62)";
-            ctx.font = "800 15px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-            ctx.fillText(code, x + unitWidth - 9, y + 19);
+            ctx.fillText(code, x + unitWidth - 8, y + 17);
+            ctx.textAlign = "center";
+          }
+
+          if (assignment) {
+            if (!isRepresentative) {
+              ctx.textAlign = "right";
+              ctx.fillStyle = assignment.duplicate ? "#7a2119" : "rgba(4,44,57,.62)";
+              ctx.font = "800 15px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
+              ctx.fillText(code, x + unitWidth - 9, y + 19);
+            }
             ctx.textAlign = "center";
             ctx.fillStyle = assignment.duplicate ? "#6f1e17" : "#042c39";
             fitCanvasText(ctx, assignment.name, unitWidth - 18, 27);
@@ -941,7 +977,7 @@
           } else {
             ctx.fillStyle = "#38434e";
             ctx.font = "850 20px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-            ctx.fillText(code, x + unitWidth / 2, y + rowHeight / 2 + 7);
+            ctx.fillText(isRepresentative ? "이름 입력" : code, x + unitWidth / 2, y + rowHeight / 2 + 10);
           }
         });
       }

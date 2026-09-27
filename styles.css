@@ -430,6 +430,11 @@ body.panel-resizing {
   background: var(--accent);
 }
 
+.legend-dot.representative {
+  border-color: #178eb0;
+  background: #eaf8fc;
+}
+
 .classroom {
   min-height: 0;
   display: grid;
@@ -530,6 +535,36 @@ body.panel-resizing {
   letter-spacing: -0.02em;
 }
 
+.representative-seat {
+  border-color: #178eb0;
+  background: #eaf8fc;
+}
+
+.representative-seat .seat-code,
+.seat-role {
+  position: absolute;
+  top: 2px;
+  font-size: 8px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.representative-seat .seat-code {
+  right: 4px;
+  color: #19718d;
+}
+
+.seat-role {
+  left: 4px;
+  color: #19718d;
+}
+
+.representative-seat .seat-name {
+  grid-row: 1 / -1;
+  align-self: stretch;
+  padding-top: 8px;
+}
+
 .seat-name {
   width: 100%;
   min-width: 0;
@@ -575,6 +610,10 @@ body.panel-resizing {
   grid-row: 1 / -1;
   align-self: stretch;
   color: #042c39;
+}
+
+.seat.assigned .seat-role {
+  color: rgb(2 47 61 / 68%);
 }
 
 .seat.duplicate {
