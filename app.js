@@ -63,13 +63,14 @@
     },
   ];
   const representativeSeats = new Set(["D1", "E1", "F1", "G1", "H1", "I1", "J1", "K1"]);
+  const seatRoles = Object.freeze({ C1: "과대", C2: "과대단1", C10: "과대단2", L10: "과대단3", L1: "과대단4" });
 
   const validSeats = new Set();
   for (const section of sections) {
     for (let row = 10; row >= 1; row -= 1) {
       for (const column of section.columns) {
         const code = `${column}${row}`;
-        if (section.isSeat(column, row) && !section.specials[code]) validSeats.add(code);
+        if (code !== "B1" && (seatRoles[code] || section.isSeat(column, row))) validSeats.add(code);
       }
     }
   }
@@ -153,7 +154,7 @@
         section.columns.forEach((column) => {
           const code = `${column}${row}`;
 
-          if (section.specials[code]) {
+          if (code === "B1") {
             const special = document.createElement("div");
             special.className = "special-seat";
             special.textContent = section.specials[code];
@@ -162,7 +163,7 @@
             return;
           }
 
-          if (!section.isSeat(column, row)) {
+          if (!validSeats.has(code)) {
             const empty = document.createElement("div");
             empty.className = "seat-empty";
             empty.setAttribute("aria-hidden", "true");
@@ -174,13 +175,14 @@
           seat.className = "seat";
           seat.dataset.seat = code;
           if (representativeSeats.has(code)) seat.classList.add("representative-seat");
+          if (seatRoles[code]) seat.classList.add("role-seat");
           const seatCode = document.createElement("span");
           seatCode.className = "seat-code";
           seatCode.textContent = code;
 
           const seatRole = document.createElement("span");
           seatRole.className = "seat-role";
-          seatRole.textContent = "대표학생";
+          seatRole.textContent = seatRoles[code] || "대표학생";
 
           const seatName = document.createElement("input");
           seatName.className = "seat-name";
@@ -191,7 +193,8 @@
           seatName.placeholder = "이름";
           seatName.readOnly = isViewerMode;
           if (isViewerMode) seatName.tabIndex = -1;
-          seatName.setAttribute("aria-label", representativeSeats.has(code) ? `${code} 대표학생 자리 이름` : `${code} 자리 이름`);
+          const role = seatRoles[code] || (representativeSeats.has(code) ? "대표학생" : "");
+          seatName.setAttribute("aria-label", `${code} ${role ? `${role} ` : ""}자리 이름`);
           seatName.addEventListener("blur", (event) => updateNameFromSeat(code, event.target.value));
           seatName.addEventListener("keydown", (event) => {
             if (event.key === "Enter") {
@@ -205,7 +208,7 @@
             }
           });
 
-          if (representativeSeats.has(code)) {
+          if (representativeSeats.has(code) || seatRoles[code]) {
             seat.append(seatCode, seatRole, seatName);
           } else {
             seat.append(seatCode, seatName);
@@ -389,7 +392,8 @@
       seatEl.classList.toggle("assigned", Boolean(assignment));
       seatEl.classList.toggle("duplicate", Boolean(assignment?.duplicate));
       if (document.activeElement !== nameEl) nameEl.value = assignment?.name ?? "";
-      const roleLabel = representativeSeats.has(code) ? "대표학생 자리" : "자리";
+      const role = seatRoles[code] || (representativeSeats.has(code) ? "대표학생" : "");
+      const roleLabel = role ? `${role} 자리` : "자리";
       nameEl.setAttribute("aria-label", assignment ? `${code} ${roleLabel} ${assignment.name}` : `${code} ${roleLabel} 이름`);
 
       if (assignment && previous !== assignment.name) {
@@ -752,6 +756,13 @@
   }
 
   function getExportSnapshot() {
+    // Safari can activate a toolbar button without blurring the edited seat.
+    // Commit its visible name first so the download always matches the screen.
+    const activeInput = document.activeElement;
+    if (!isViewerMode && activeInput?.matches?.(".seat-name")) {
+      const seat = activeInput.closest(".seat")?.dataset.seat;
+      if (validSeats.has(seat)) updateNameFromSeat(seat, activeInput.value);
+    }
     const calculated = calculateState();
     const assignedBySeat = new Map();
     const namedCount = rows.filter((row) => escapeText(row.name)).length;
@@ -778,24 +789,15 @@
   }
 
   async function buildReferenceStyleWorkbook(snapshot) {
-    const response = await fetch("./seat-layout-template.xlsx", { cache: "no-store" });
-    if (!response.ok) throw new Error(`자리표 서식 파일을 불러오지 못했습니다. (${response.status})`);
-
+    if (!window.SEAT_LAYOUT_TEMPLATE_BASE64) throw new Error("자리표 서식이 없습니다. 페이지를 새로고침해 주세요.");
+    // A bundled script works on both GitHub Pages and a directly opened file:// page.
+    const templateBytes = Uint8Array.from(atob(window.SEAT_LAYOUT_TEMPLATE_BASE64), (character) => character.charCodeAt(0));
     const workbook = new window.ExcelJS.Workbook();
-    await workbook.xlsx.load(await response.arrayBuffer());
+    await workbook.xlsx.load(templateBytes);
     const worksheet = workbook.worksheets[0];
     worksheet.name = "확정 자리표";
     const fixedRoleStyle = JSON.parse(JSON.stringify(worksheet.getCell("G12").style));
     const representativeStyle = JSON.parse(JSON.stringify(worksheet.getCell("H12").style));
-
-    worksheet.eachRow({ includeEmpty: false }, (row) => {
-      row.eachCell({ includeEmpty: false }, (cell) => {
-        const seat = normalizeSeat(cell.value);
-        if (!validSeats.has(seat)) return;
-        const assignment = snapshot.assignedBySeat.get(seat);
-        cell.value = assignment?.name || seat;
-      });
-    });
 
     const removedH10Cell = worksheet.getCell("L3");
     removedH10Cell.value = null;
@@ -806,13 +808,27 @@
     b1Cell.style = JSON.parse(JSON.stringify(fixedRoleStyle));
 
     const c1Cell = worksheet.getCell("E12");
-    c1Cell.value = "과대";
     c1Cell.style = fixedRoleStyle;
 
     const d1Cell = worksheet.getCell("G12");
-    const d1Assignment = snapshot.assignedBySeat.get("D1");
-    d1Cell.value = d1Assignment?.name || "D1";
     d1Cell.style = representativeStyle;
+
+    // Resolve cells by coordinate, not old template labels (some role cells have no code).
+    const columns = { A: "C", B: "D", C: "E", D: "G", E: "H", F: "I", G: "J", H: "L", I: "M", J: "N", K: "O", L: "Q", M: "R", N: "S" };
+    worksheet.getCell("J3").style = JSON.parse(JSON.stringify(worksheet.getCell("G3").style));
+    worksheet.getCell("G3").value = null;
+    worksheet.getCell("G3").style = JSON.parse(JSON.stringify(worksheet.getCell("M3").style));
+    validSeats.forEach((seat) => {
+      const cell = worksheet.getCell(`${columns[seat[0]]}${13 - Number(seat.slice(1))}`);
+      const assignment = snapshot.assignedBySeat.get(seat);
+      cell.value = assignment?.name || seatRoles[seat] || seat;
+      if (assignment?.duplicate) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFB8B1" } };
+    });
+    worksheet.pageSetup = {
+      orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 1,
+      printArea: "B1:T17", horizontalCentered: true,
+      margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
+    };
 
     const roster = workbook.addWorksheet("전체 명단", {
       views: [{ state: "frozen", ySplit: 1 }],
@@ -835,8 +851,8 @@
     return workbook;
   }
 
-  function downloadExcelBuffer(buffer, fileName) {
-    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  function downloadFileBuffer(buffer, fileName, mimeType) {
+    const blob = new Blob([buffer], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -844,7 +860,7 @@
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
   async function exportWorkbook() {
@@ -859,7 +875,7 @@
 
     try {
       const workbook = await buildReferenceStyleWorkbook(snapshot);
-      downloadExcelBuffer(await workbook.xlsx.writeBuffer(), `확정_자리표_${getDateStamp()}.xlsx`);
+      downloadFileBuffer(await workbook.xlsx.writeBuffer(), `확정_자리표_${getDateStamp()}.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       addToast(snapshot.hasProblems ? "엑셀을 저장했습니다. 중복·오류 자리를 확인해 주세요." : "첨부 형식으로 엑셀을 저장했습니다.", snapshot.hasProblems ? "error" : "");
     } catch (error) {
       console.error(error);
@@ -870,156 +886,9 @@
     }
   }
 
-  function roundedRect(ctx, x, y, width, height, radius, fill, stroke, lineWidth = 1) {
-    ctx.beginPath();
-    ctx.roundRect(x, y, width, height, radius);
-    if (fill) {
-      ctx.fillStyle = fill;
-      ctx.fill();
-    }
-    if (stroke) {
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = lineWidth;
-      ctx.stroke();
-    }
-  }
-
-  function fitCanvasText(ctx, text, maxWidth, initialSize, minSize = 15) {
-    let size = initialSize;
-    do {
-      ctx.font = `900 ${size}px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif`;
-      if (ctx.measureText(text).width <= maxWidth) return size;
-      size -= 1;
-    } while (size > minSize);
-    return minSize;
-  }
-
   function drawFinalSeatChart(snapshot) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 2100;
-    canvas.height = 1450;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#f4f6f7";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.fillStyle = "#111820";
-    ctx.fillRect(0, 0, canvas.width, 142);
-    ctx.fillStyle = "#28d7a1";
-    ctx.beginPath();
-    ctx.arc(72, 70, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "900 48px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-    ctx.fillText("확정 자리표", 105, 86);
-    ctx.fillStyle = "#aeb8c2";
-    ctx.font = "700 20px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText(`배치 ${snapshot.assignedCount}명 · 대기 ${snapshot.waitingCount}명 · ${new Date().toLocaleString("ko-KR")}`, 2030, 82);
-    ctx.textAlign = "left";
-
-    const marginX = 72;
-    const gridTop = 220;
-    const gridHeight = 980;
-    const labelHeight = 56;
-    const rowHeight = (gridHeight - labelHeight) / 10;
-    const sectionGap = 26;
-    const usableWidth = canvas.width - marginX * 2 - sectionGap * 3;
-    const unitWidth = usableWidth / 14;
-    let sectionX = marginX;
-
-    ctx.textAlign = "center";
-    sections.forEach((section) => {
-      const sectionWidth = unitWidth * section.columns.length;
-      ctx.fillStyle = "#111820";
-      ctx.fillRect(sectionX, gridTop - 6, sectionWidth, 6);
-
-      for (let row = 10; row >= 1; row -= 1) {
-        const rowIndex = 10 - row;
-        section.columns.forEach((column, columnIndex) => {
-          const code = `${column}${row}`;
-          const x = sectionX + columnIndex * unitWidth;
-          const y = gridTop + rowIndex * rowHeight;
-
-          if (section.specials[code]) {
-            ctx.fillStyle = "#ebe7dc";
-            ctx.fillRect(x, y, unitWidth, rowHeight);
-            ctx.strokeStyle = "#b8c0c7";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(x, y, unitWidth, rowHeight);
-            ctx.fillStyle = "#655c48";
-            ctx.font = "850 19px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-            ctx.fillText(section.specials[code], x + unitWidth / 2, y + rowHeight / 2 + 7);
-            return;
-          }
-
-          if (!section.isSeat(column, row)) return;
-          const assignment = snapshot.assignedBySeat.get(code);
-          const isRepresentative = representativeSeats.has(code);
-          ctx.fillStyle = assignment?.duplicate ? "#ffb8b1" : assignment ? "#0da9d6" : isRepresentative ? "#eaf8fc" : "#ffffff";
-          ctx.fillRect(x, y, unitWidth, rowHeight);
-          ctx.strokeStyle = assignment || isRepresentative ? "#178eb0" : "#b8c0c7";
-          ctx.lineWidth = 2;
-          ctx.strokeRect(x, y, unitWidth, rowHeight);
-
-          if (isRepresentative) {
-            ctx.textAlign = "left";
-            ctx.fillStyle = assignment ? "rgba(4,44,57,.72)" : "#19718d";
-            ctx.font = "800 13px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-            ctx.fillText("대표학생", x + 8, y + 17);
-            ctx.textAlign = "right";
-            ctx.fillText(code, x + unitWidth - 8, y + 17);
-            ctx.textAlign = "center";
-          }
-
-          if (assignment) {
-            if (!isRepresentative) {
-              ctx.textAlign = "right";
-              ctx.fillStyle = assignment.duplicate ? "#7a2119" : "rgba(4,44,57,.62)";
-              ctx.font = "800 15px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-              ctx.fillText(code, x + unitWidth - 9, y + 19);
-            }
-            ctx.textAlign = "center";
-            ctx.fillStyle = assignment.duplicate ? "#6f1e17" : "#042c39";
-            fitCanvasText(ctx, assignment.name, unitWidth - 18, 27);
-            ctx.fillText(assignment.name, x + unitWidth / 2, y + rowHeight / 2 + 10);
-          } else {
-            ctx.fillStyle = "#38434e";
-            ctx.font = "850 20px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-            ctx.fillText(isRepresentative ? "이름 입력" : code, x + unitWidth / 2, y + rowHeight / 2 + 10);
-          }
-        });
-      }
-
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(sectionX, gridTop + rowHeight * 10, sectionWidth, labelHeight);
-      ctx.strokeStyle = "#b8c0c7";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(sectionX, gridTop + rowHeight * 10, sectionWidth, labelHeight);
-      ctx.fillStyle = "#4e5964";
-      ctx.font = "850 22px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-      ctx.fillText(section.label, sectionX + sectionWidth / 2, gridTop + rowHeight * 10 + 36);
-      sectionX += sectionWidth + sectionGap;
-    });
-
-    const frontY = 1270;
-    const frontGap = 26;
-    const frontWidth = (canvas.width - marginX * 2 - frontGap * 3) / 4;
-    ["창가", "교탁 · PC · 교수님", "교단", "앞문"].forEach((label, index) => {
-      const x = marginX + index * (frontWidth + frontGap);
-      roundedRect(ctx, x, frontY, frontWidth, 82, 8, "#ffffff", "#b9c1c8", 2);
-      ctx.fillStyle = "#515c66";
-      ctx.font = "800 21px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(label, x + frontWidth / 2, frontY + 50);
-    });
-
-    ctx.fillStyle = "#6f7a86";
-    ctx.font = "650 16px Pretendard, Apple SD Gothic Neo, Noto Sans KR, sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText("자리배치 LIVE에서 생성", marginX, 1410);
-    ctx.textAlign = "right";
-    ctx.fillText(snapshot.hasProblems ? "주의: 중복 또는 잘못된 자리 입력이 포함되어 있습니다." : "최종 확인용", canvas.width - marginX, 1410);
-    return canvas;
+    if (!window.SeatChartExport) throw new Error("PDF 양식을 불러오지 못했습니다. 새로고침해 주세요.");
+    return window.SeatChartExport.draw(snapshot, { sections, validSeats, roles: seatRoles, representativeSeats });
   }
 
   function exportPdf() {
@@ -1036,9 +905,9 @@
         const snapshot = getExportSnapshot();
         const canvas = drawFinalSeatChart(snapshot);
         const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4", compress: true });
-        pdf.setProperties({ title: "확정 자리표", subject: "자리배치 LIVE 최종 자리표", creator: "자리배치 LIVE" });
-        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 8, 8, 281, 194, undefined, "FAST");
-        pdf.save(`확정_자리표_${getDateStamp()}.pdf`);
+        pdf.setProperties({ title: "확정 자리배치표", subject: "자리배치 LIVE 최종 자리표", creator: "자리배치 LIVE" });
+        pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 297, 210, undefined, "FAST");
+        downloadFileBuffer(pdf.output("arraybuffer"), `확정_자리표_${getDateStamp()}.pdf`, "application/pdf");
         addToast(snapshot.hasProblems ? "PDF를 저장했습니다. 중복·오류 자리를 확인해 주세요." : "확정 자리표 PDF를 저장했습니다.", snapshot.hasProblems ? "error" : "");
       } catch (error) {
         console.error(error);

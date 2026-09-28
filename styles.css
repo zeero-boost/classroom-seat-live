@@ -541,6 +541,7 @@ body.panel-resizing {
 }
 
 .representative-seat .seat-code,
+.role-seat .seat-code,
 .seat-role {
   position: absolute;
   top: 2px;
@@ -549,7 +550,8 @@ body.panel-resizing {
   line-height: 1;
 }
 
-.representative-seat .seat-code {
+.representative-seat .seat-code,
+.role-seat .seat-code {
   right: 4px;
   color: #19718d;
 }
@@ -559,7 +561,8 @@ body.panel-resizing {
   color: #19718d;
 }
 
-.representative-seat .seat-name {
+.representative-seat .seat-name,
+.role-seat .seat-name {
   grid-row: 1 / -1;
   align-self: stretch;
   padding-top: 8px;
@@ -614,6 +617,20 @@ body.panel-resizing {
 
 .seat.assigned .seat-role {
   color: rgb(2 47 61 / 68%);
+}
+
+.seat.role-seat:not(.duplicate) {
+  color: #182b37;
+  background: #f1ede4;
+  border-color: #b8c0c7;
+}
+
+.seat.role-seat .seat-role {
+  color: #6b5941;
+}
+
+.role-seat .seat-name::placeholder {
+  color: #8a7d6c;
 }
 
 .seat.duplicate {
