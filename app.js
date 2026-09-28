@@ -31,7 +31,7 @@
     "ㅡ": "M",
     "ㅜ": "N",
   });
-  const roomIdFromUrl = new URLSearchParams(window.location.search).get("room") || "";
+  const roomIdFromUrl = getSharedRoomId(window.location.href);
   const isViewerMode = /^[a-f0-9]{32}$/i.test(roomIdFromUrl);
 
   if (isViewerMode) document.body.classList.add("viewer-mode");
@@ -1279,11 +1279,36 @@
     return credential.user;
   }
 
+  function encodeShareCode(sessionId) {
+    if (!/^[a-f0-9]{32}$/i.test(sessionId)) return "";
+    const bytes = sessionId.match(/.{2}/g).map((hex) => String.fromCharCode(parseInt(hex, 16))).join("");
+    return btoa(bytes).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  }
+
+  function getSharedRoomId(href) {
+    const url = new URL(href);
+    const legacyId = url.searchParams.get("room") || "";
+    if (/^[a-f0-9]{32}$/i.test(legacyId)) return legacyId;
+
+    const code = url.search.slice(1);
+    if (!/^[A-Za-z0-9_-]{22}$/.test(code)) return "";
+    try {
+      const bytes = atob(code.replaceAll("-", "+").replaceAll("_", "/") + "==");
+      const sessionId = Array.from(bytes, (byte) => byte.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+      return encodeShareCode(sessionId) === code ? sessionId : "";
+    } catch {
+      return "";
+    }
+  }
+
   function buildShareUrl(sessionId) {
-    const url = new URL(window.location.href);
-    url.search = "";
+    const pageUrl = new URL(window.location.href);
+    const url = pageUrl.protocol === "file:"
+      ? new URL("https://zeero-boost.github.io/classroom-seat-live/")
+      : pageUrl;
+    url.pathname = url.pathname.replace(/\/index\.html$/i, "/");
+    url.search = encodeShareCode(sessionId);
     url.hash = "";
-    url.searchParams.set("room", sessionId);
     return url.href;
   }
 
